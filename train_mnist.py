@@ -1,10 +1,8 @@
-"""Train Real NVP on CIFAR-10.
+#! /home/maccetto/.rnvp/maip-venv/bin/python3
 
-Train script adapted from: https://github.com/kuangliu/pytorch-cifar/
-"""
 import argparse
 import os
-import torch
+import torch 
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.utils.data as data
@@ -25,20 +23,33 @@ def main(args):
 		transforms.RandomHorizontalFlip(),
 		transforms.ToTensor()
 	])
-
+	#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
 	transform_test = transforms.Compose([
 		transforms.ToTensor()
 	])
+	#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
 
-	trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
-	trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+	if args.dataset == 'MNIST':
+		trainset = torchvision.datasets.MNIST(root='data', train=True, download=True, transform=transform_train)
+		trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
-	testset = torchvision.datasets.CIFAR10(root='data', train=False, download=True, transform=transform_test)
-	testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+		testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform_test)
+		testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-	# Model
-	print('Building model..')
-	net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
+		print('Building model..') 
+		# mid_channels = 64 for mnist overkill?
+		net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8)
+	elif args.dataset == 'CIFAR-10':
+		trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
+		trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+
+		testset = torchvision.datasets.CIFAR10(root='data', train=False, download=True, transform=transform_test)
+		testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+		print('Building model..')
+		net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
+
+
 	net = net.to(device)
 	if device == 'cuda':
 		net = torch.nn.DataParallel(net, args.gpu_ids)
@@ -135,17 +146,19 @@ def test(epoch, net, testloader, device, loss_fn, num_samples):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
+	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
 	parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
+	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
 	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
-	parser.add_argument('--lr', default=1e-3, type=float, help='Learning rate')
+	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
 	parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
 	parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
 	parser.add_argument('--num_samples', default=64, type=int, help='Number of samples at test time')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 	parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 	parser.add_argument('--weight_decay', default=5e-5, type=float,
-						help='L2 regularization (only applied to the weight norm scale factors)')
+											help='L2 regularization (only applied to the weight norm scale factors)')
 
 	best_loss = 0
 
