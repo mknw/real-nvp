@@ -1,4 +1,4 @@
-#! /home/maccetto/.rnvp/maip-venv/bin/python3
+#!~/venv/maip-venv/bin/python3
 
 import argparse
 import os
