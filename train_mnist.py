@@ -1,4 +1,4 @@
-#!~/venv/maip-venv/bin/python3
+#!/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
 
 import argparse
 import os
