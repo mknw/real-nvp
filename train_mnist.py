@@ -104,8 +104,8 @@ def sample(net, batch_size, device):
 		batch_size (int): Number of samples to generate.
 		device (torch.device): Device to use.
 	"""
-
-	z = torch.randn((batch_size, net.in_channels, 32, 32), dtype=torch.float32, device=device) # changed 3 -> net.in_channels for mnist
+	# side_size = 28 if net.in_channels == 1 else 32 # debatable.. but ok for now.
+	z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device) #changed 3 -> 1
 	x, _ = net(z, reverse=True)
 	x = torch.sigmoid(x)
 
