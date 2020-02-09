@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 def main(args):
 	device = 'cuda' if torch.cuda.is_available() and len(args.gpu_ids) > 0 else 'cpu'
+	print("training on: %s" % device)
 	start_epoch = 0
 
 	# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
@@ -38,6 +39,7 @@ def main(args):
 
 		print('Building model..') 
 		# mid_channels = 64 for mnist overkill?
+		# num_scales =2 ??
 		net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8)
 	elif args.dataset == 'CIFAR-10':
 		trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
@@ -102,7 +104,8 @@ def sample(net, batch_size, device):
 		batch_size (int): Number of samples to generate.
 		device (torch.device): Device to use.
 	"""
-	z = torch.randn((batch_size, 3, 32, 32), dtype=torch.float32, device=device)
+
+	z = torch.randn((batch_size, net.in_channels, 32, 32), dtype=torch.float32, device=device) # changed 3 -> net.in_channels for mnist
 	x, _ = net(z, reverse=True)
 	x = torch.sigmoid(x)
 
@@ -150,7 +153,7 @@ if __name__ == '__main__':
 	parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
+	parser.add_argument('--gpu_ids', default='[1]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
 	parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
 	parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
@@ -159,7 +162,7 @@ if __name__ == '__main__':
 	parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 	parser.add_argument('--weight_decay', default=5e-5, type=float,
 											help='L2 regularization (only applied to the weight norm scale factors)')
-
+	
 	best_loss = 0
 
 	main(parser.parse_args())

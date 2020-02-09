@@ -72,7 +72,7 @@ class RealNVP(nn.Module):
 class _RealNVP(nn.Module):
     """Recursive builder for a `RealNVP` model.
 
-    Each `_RealNVPBuilder` corresponds to a single scale in `RealNVP`,
+    Each/`_RealNVPBuilder` corresponds to a single scale in `RealNVP`,
     and the constructor is recursively called to build a full `RealNVP` model.
 
     Args:
