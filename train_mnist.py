@@ -15,22 +15,22 @@ from tqdm import tqdm
 
 
 def main(args):
-	device = 'cuda' if torch.cuda.is_available() and len(args.gpu_ids) > 0 else 'cpu'
+	# device = 'cuda' if torch.cuda.is_available() and len(args.gpu_ids) > 0 else 'cpu'
+	device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
 	print("training on: %s" % device)
 	start_epoch = 0
 
-	# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
-	transform_train = transforms.Compose([
-		transforms.RandomHorizontalFlip(),
-		transforms.ToTensor()
-	])
-	#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-	transform_test = transforms.Compose([
-		transforms.ToTensor()
-	])
 	#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
 
 	if args.dataset == 'MNIST':
+		transform_train = transforms.Compose([
+			transforms.ToTensor()
+		])
+		#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
+		transform_test = transforms.Compose([
+			transforms.ToTensor()
+		])
+
 		trainset = torchvision.datasets.MNIST(root='data', train=True, download=True, transform=transform_train)
 		trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
@@ -42,6 +42,16 @@ def main(args):
 		# num_scales =2 ??
 		net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8)
 	elif args.dataset == 'CIFAR-10':
+		# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
+		transform_train = transforms.Compose([
+			transforms.RandomHorizontalFlip(),
+			transforms.ToTensor()
+		])
+		#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
+		transform_test = transforms.Compose([
+			transforms.ToTensor()
+		])
+
 		trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
 		trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
 
@@ -53,7 +63,11 @@ def main(args):
 
 
 	net = net.to(device)
-	if device == 'cuda':
+	print()
+	print(device)
+	print()
+
+	if str(device).startswith('cuda'):
 		net = torch.nn.DataParallel(net, args.gpu_ids)
 		cudnn.benchmark = args.benchmark
 
@@ -69,11 +83,11 @@ def main(args):
 
 	loss_fn = RealNVPLoss()
 	param_groups = util.get_param_groups(net, args.weight_decay, norm_suffix='weight_g')
-	optimizer = optim.Adam(param_groups, lr=args.lr)
+	optimizer = optim.Adam(param_groups, lr=args.lr, eps=1e-7)
 
 	for epoch in range(start_epoch, start_epoch + args.num_epochs):
 		train(epoch, net, trainloader, device, optimizer, loss_fn, args.max_grad_norm)
-		test(epoch, net, testloader, device, loss_fn, args.num_samples)
+		test(epoch, net, testloader, device, loss_fn, args.num_samples, args.dir_samples)
 
 
 def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
@@ -112,7 +126,7 @@ def sample(net, batch_size, device):
 	return x
 
 
-def test(epoch, net, testloader, device, loss_fn, num_samples):
+def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 	global best_loss
 	net.eval()
 	loss_meter = util.AverageMeter()
@@ -135,15 +149,16 @@ def test(epoch, net, testloader, device, loss_fn, num_samples):
 			'test_loss': loss_meter.avg,
 			'epoch': epoch,
 		}
-		os.makedirs('ckpts', exist_ok=True)
-		torch.save(state, 'ckpts/best.pth.tar')
+		ckpt_dir = 'ckpts\{}'.format(dir_samples)
+		os.makedirs(ckpt_dir, exist_ok=True)
+		torch.save(state, ckpt_dir + 'best.pth.tar')
 		best_loss = loss_meter.avg
 
 	# Save samples and data
 	images = sample(net, num_samples, device)
-	os.makedirs('samples', exist_ok=True)
+	os.makedirs(dir_samples, exist_ok=True)
 	images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
-	torchvision.utils.save_image(images_concat, 'samples/epoch_{}.png'.format(epoch))
+	torchvision.utils.save_image(images_concat, '{}/epoch_{}.png'.format(dir_samples, epoch))
 
 
 if __name__ == '__main__':
@@ -153,16 +168,18 @@ if __name__ == '__main__':
 	parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-	parser.add_argument('--gpu_ids', default='[1]', type=eval, help='IDs of GPUs to use')
+	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
 	parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
-	parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
-	parser.add_argument('--num_samples', default=64, type=int, help='Number of samples at test time')
+	parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
+	parser.add_argument('--num_samples', default=100, type=int, help='Number of samples at test time')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 	parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 	parser.add_argument('--weight_decay', default=5e-5, type=float,
 											help='L2 regularization (only applied to the weight norm scale factors)')
+	parser.add_argument('--dir_samples', default="samples_new", help="Directory for storing generated samples")
 	
 	best_loss = 0
+	import ipdb; ipdb.set_trace()
 
 	main(parser.parse_args())

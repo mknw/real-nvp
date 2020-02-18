@@ -38,8 +38,7 @@ class ResNet(nn.Module):
 		try:
 			x = self.in_norm(x) # FIND THIS MF
 		except RuntimeError:
-			#import ipdb; ipdb.set_trace()
-			print("SELF.IN_NORM(X) FAILED IN RESNET")
+			import ipdb; ipdb.set_trace()
 		if self.double_after_norm:
 			x *= 2.
 		x = torch.cat((x, -x), dim=1)
