@@ -130,6 +130,7 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 	global best_loss
 	net.eval()
 	loss_meter = util.AverageMeter()
+	bpd_meter = util.AverageMeter()
 	with torch.no_grad():
 		with tqdm(total=len(testloader.dataset)) as progress_bar:
 			for x, _ in testloader:
@@ -137,8 +138,11 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 				z, sldj = net(x, reverse=False)
 				loss = loss_fn(z, sldj)
 				loss_meter.update(loss.item(), x.size(0))
+				# bits per dimensions
+				bpd_meter.update(util.bits_per_dim(x, loss_meter.avg), x.size(0))
+
 				progress_bar.set_postfix(loss=loss_meter.avg,
-										 bpd=util.bits_per_dim(x, loss_meter.avg))
+																 bpd=bpd_meter.avg)
 				progress_bar.update(x.size(0))
 
 	# Save checkpoint
@@ -149,9 +153,9 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 			'test_loss': loss_meter.avg,
 			'epoch': epoch,
 		}
-		ckpt_dir = 'ckpts\{}'.format(dir_samples)
+		ckpt_dir = 'ckpts/{}'.format(dir_samples)
 		os.makedirs(ckpt_dir, exist_ok=True)
-		torch.save(state, ckpt_dir + 'best.pth.tar')
+		torch.save(state, ckpt_dir + '/best.pth.tar')
 		best_loss = loss_meter.avg
 
 	# Save samples and data
@@ -160,12 +164,17 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 	images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
 	torchvision.utils.save_image(images_concat, '{}/epoch_{}.png'.format(dir_samples, epoch))
 
+	with open('{}/log'.format(dir_samples), 'a') as l:
+		report = ", ".join([str(m) for m in [epoch, loss_meter.avg, bpd_meter.avg]])
+		report += "\n"
+		l.write(report)
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
 	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
-	parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
+	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
 	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
@@ -177,9 +186,8 @@ if __name__ == '__main__':
 	parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 	parser.add_argument('--weight_decay', default=5e-5, type=float,
 											help='L2 regularization (only applied to the weight norm scale factors)')
-	parser.add_argument('--dir_samples', default="samples_new", help="Directory for storing generated samples")
+	parser.add_argument('--dir_samples', default="real_samples_rtx2080", help="Directory for storing generated samples")
 	
 	best_loss = 0
-	import ipdb; ipdb.set_trace()
 
 	main(parser.parse_args())

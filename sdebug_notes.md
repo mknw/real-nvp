@@ -3,7 +3,7 @@
 To debug your python application via interactive debugger (e.g. to inspect tensor and 
 
 1. on fs0, type:
-   - `preserve -# 1 -s $(date -d '+1 minute' +"%H:%M") -t 900 -native "-C gpunode"` \
+   - `preserve -# 1 -s $(date -d '+1 minute' +"%H:%M") -t 900 -q proq -native "-C gpunode"` \
    - or request a specific node with `-q "all.q@nodeXXX"`
       
 
