@@ -39,7 +39,7 @@ def main(args):
 
 		print('Building model..') 
 		# net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8, **args.__dict__)
-		net = RealNVP(**args.__dict__)
+		net = RealNVP(**filter_args(args.__dict__))
 
 	elif args.dataset == 'CIFAR-10':
 		# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
@@ -170,6 +170,12 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 		l.write(report)
 
 
+def filter_args(arg_dict, arch_fields=None):
+	"""only pass to network architecture relevant fields."""
+	if not arch_fields:
+		arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'num_blocks']
+	return {k, v for k, v in arg_dicts if k in arch_fields}
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
@@ -195,6 +201,7 @@ if __name__ == '__main__':
 	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
 	parser.add_argument('--mid_channels', default=64, type=int, help='N of feature maps for first resnet layer')
 	parser.add_argument('--num_blocks', default=8, type=int, help='N of residual blocks in resnet')
+
 
 	
 	best_loss = 0
