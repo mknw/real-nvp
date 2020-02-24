@@ -21,12 +21,13 @@ class RealNVP(nn.Module):
 		num_blocks (int): Number of residual blocks in the s and t network of
 		`Coupling` layers.
 	"""
-	def __init__(self, num_scales=2, in_channels=3, mid_channels=64, num_blocks=8):
+	def __init__(self, **kwargs):
+		# the above defaults will be overridden by `main` in `train[_mnist].py
 		super(RealNVP, self).__init__()
 		# Register data_constraint to pre-process images, not learnable
 		self.register_buffer('data_constraint', torch.tensor([0.9], dtype=torch.float32))
 
-		self.flows = _RealNVP(0, num_scales, in_channels, mid_channels, num_blocks)
+		self.flows = _RealNVP(0, **kwargs)
 
 	def forward(self, x, reverse=False):
 		sldj = None
@@ -83,27 +84,33 @@ class _RealNVP(nn.Module):
 		num_blocks (int): Number of residual blocks in the s and t network of
 			`Coupling` layers.
 	"""
-	def __init__(self, scale_idx, num_scales, in_channels, mid_channels, num_blocks):
+	def __init__(self, scale_idx, **kwargs): #num_scales, in_channels, mid_channels, num_blocks, net_type,
+
 		super(_RealNVP, self).__init__()
 
-		self.is_last_block = scale_idx == num_scales - 1
+		self.__dict__.update(kwargs) # assign attribute to architecture recursion module. 
+
+		self.is_last_block = scale_idx == kwargs['num_scales'] - 1
 
 		self.in_couplings = nn.ModuleList([
-			CouplingLayer(in_channels, mid_channels, num_blocks, MaskType.CHECKERBOARD, reverse_mask=False),
-			CouplingLayer(in_channels, mid_channels, num_blocks, MaskType.CHECKERBOARD, reverse_mask=True),
-			CouplingLayer(in_channels, mid_channels, num_blocks, MaskType.CHECKERBOARD, reverse_mask=False)
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=False),
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=True),
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=False)
 		])
 
 		if self.is_last_block:
 			self.in_couplings.append(
-				CouplingLayer(in_channels, mid_channels, num_blocks, MaskType.CHECKERBOARD, reverse_mask=True))
+				CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=True))
 		else:
+			# TODO move computations for in_ and mid_ channels here.
 			self.out_couplings = nn.ModuleList([
-				CouplingLayer(4 * in_channels, 2 * mid_channels, num_blocks, MaskType.CHANNEL_WISE, reverse_mask=False),
-				CouplingLayer(4 * in_channels, 2 * mid_channels, num_blocks, MaskType.CHANNEL_WISE, reverse_mask=True),
-				CouplingLayer(4 * in_channels, 2 * mid_channels, num_blocks, MaskType.CHANNEL_WISE, reverse_mask=False)
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks, MaskType.CHANNEL_WISE, reverse_mask=False),
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks, MaskType.CHANNEL_WISE, reverse_mask=True),
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks, MaskType.CHANNEL_WISE, reverse_mask=False)
 			])
-			self.next_block = _RealNVP(scale_idx + 1, num_scales, 2 * in_channels, 2 * mid_channels, num_blocks)
+			kwargs['in_channels'] *= 2 # increase number of input and output
+			kwargs['mid_channels'] *= 2 # channels for next multi-scale block.
+			self.next_block = _RealNVP(scale_idx + 1, **kwargs)
 
 	def forward(self, x, sldj, reverse=False):
 		if reverse:

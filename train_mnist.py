@@ -38,9 +38,9 @@ def main(args):
 		testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
 		print('Building model..') 
-		# mid_channels = 64 for mnist overkill?
-		# num_scales =2 ??
-		net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8)
+		# net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8, **args.__dict__)
+		net = RealNVP(**args.__dict__)
+
 	elif args.dataset == 'CIFAR-10':
 		# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
 		transform_train = transforms.Compose([
@@ -173,20 +173,29 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
-	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
-	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
-	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
-	parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
-	parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
-	parser.add_argument('--num_samples', default=100, type=int, help='Number of samples at test time')
+	parser.add_argument('--gpu_ids', default='[0, 1]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 	parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
+	parser.add_argument('--dir_samples', default="real_samples_3_8_64", help="Directory for storing generated samples")
+	# Hyperparameters
+	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
+	parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
+	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
+	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
 	parser.add_argument('--weight_decay', default=5e-5, type=float,
 											help='L2 regularization (only applied to the weight norm scale factors)')
-	parser.add_argument('--dir_samples', default="real_samples_rtx2080", help="Directory for storing generated samples")
+	parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
+	# Test
+	parser.add_argument('--num_samples', default=100, type=int, help='Number of samples at test time')
+	# Architecture
+	parser.add_argument('--net_type', default='resnet', help='CNN architecture (resnet or densenet)')
+	parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
+	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
+	parser.add_argument('--mid_channels', default=64, type=int, help='N of feature maps for first resnet layer')
+	parser.add_argument('--num_blocks', default=8, type=int, help='N of residual blocks in resnet')
+
 	
 	best_loss = 0
 
