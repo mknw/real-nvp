@@ -84,7 +84,15 @@ class _RealNVP(nn.Module):
 		num_blocks (int): Number of residual blocks in the s and t network of
 			`Coupling` layers.
 	"""
-	def __init__(self, scale_idx, **kwargs): #num_scales, in_channels, mid_channels, num_blocks, net_type,
+	def __init__(self, scale_idx, **kwargs): 
+		'''
+		Args:
+		num_scales
+		in_channels
+		mid_channels
+		num_blocks
+		net_type
+		'''
 
 		super(_RealNVP, self).__init__()
 
@@ -93,20 +101,28 @@ class _RealNVP(nn.Module):
 		self.is_last_block = scale_idx == kwargs['num_scales'] - 1
 
 		self.in_couplings = nn.ModuleList([
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=False),
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=True),
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=False)
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks,
+				            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type),
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks,
+				            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type),
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, 
+				            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type)
 		])
+
 
 		if self.is_last_block:
 			self.in_couplings.append(
-				CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, MaskType.CHECKERBOARD, reverse_mask=True))
+				CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks,
+					            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type))
 		else:
 			# TODO move computations for in_ and mid_ channels here.
 			self.out_couplings = nn.ModuleList([
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks, MaskType.CHANNEL_WISE, reverse_mask=False),
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks, MaskType.CHANNEL_WISE, reverse_mask=True),
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks, MaskType.CHANNEL_WISE, reverse_mask=False)
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks,
+					            MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type),
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks,
+					            MaskType.CHANNEL_WISE, reverse_mask=True, net_type=self.net_type),
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks,
+					            MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type)
 			])
 			kwargs['in_channels'] *= 2 # increase number of input and output
 			kwargs['mid_channels'] *= 2 # channels for next multi-scale block.

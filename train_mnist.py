@@ -15,6 +15,12 @@ from tqdm import tqdm
 
 
 def main(args):
+
+	# debugging option:
+	if args.net_type == 'densenet':
+		torch.backends.cudnn.enabled = False
+		args.num_samples = 25 # test this
+
 	# device = 'cuda' if torch.cuda.is_available() and len(args.gpu_ids) > 0 else 'cpu'
 	device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
 	print("training on: %s" % device)
@@ -39,7 +45,7 @@ def main(args):
 
 		print('Building model..') 
 		# net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8, **args.__dict__)
-		net = RealNVP(**filter_args(args.__dict__))
+		net = RealNVP( **filter_args(args.__dict__) )
 
 	elif args.dataset == 'CIFAR-10':
 		# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
@@ -86,14 +92,15 @@ def main(args):
 	optimizer = optim.Adam(param_groups, lr=args.lr, eps=1e-7)
 
 	for epoch in range(start_epoch, start_epoch + args.num_epochs):
-		train(epoch, net, trainloader, device, optimizer, loss_fn, args.max_grad_norm)
-		test(epoch, net, testloader, device, loss_fn, args.num_samples, args.dir_samples)
+		train_stats = train(epoch, net, trainloader, device, optimizer, loss_fn, args.max_grad_norm)
+		test(epoch, net, testloader, device, loss_fn, args.num_samples, args.dir_samples, **train_stats)
 
 
 def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
 	print('\nEpoch: %d' % epoch)
 	net.train()
 	loss_meter = util.AverageMeter()
+	bpd_meter = util.AverageMeter()
 	with tqdm(total=len(trainloader.dataset)) as progress_bar:
 		for x, _ in trainloader:
 			x = x.to(device)
@@ -101,13 +108,17 @@ def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
 			z, sldj = net(x, reverse=False)
 			loss = loss_fn(z, sldj)
 			loss_meter.update(loss.item(), x.size(0))
+			# import ipdb; ipdb.set_trace()
 			loss.backward()
 			util.clip_grad_norm(optimizer, max_grad_norm)
 			optimizer.step()
+			bpd_meter.update(util.bits_per_dim(x, loss_meter.avg))
 
 			progress_bar.set_postfix(loss=loss_meter.avg,
-									 bpd=util.bits_per_dim(x, loss_meter.avg))
+															 bpd=bpd_meter.avg)
 			progress_bar.update(x.size(0))
+	return {'train_loss': loss_meter.avg, 
+	         'train_bpd': bpd_meter.avg}
 
 
 def sample(net, batch_size, device):
@@ -121,12 +132,17 @@ def sample(net, batch_size, device):
 	# side_size = 28 if net.in_channels == 1 else 32 # debatable.. but ok for now.
 	z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device) #changed 3 -> 1
 	x, _ = net(z, reverse=True)
+	# except RuntimeError as e:
+	# 	print(e)
+	# 	print()
+	# 	print("status of cudnn backend " + str(torch.backends.cudnn.enabled))
+	# 	import ipdb; ipdb.set_trace()
 	x = torch.sigmoid(x)
 
-	return x
+	return x, z
 
 
-def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
+def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **args):
 	global best_loss
 	net.eval()
 	loss_meter = util.AverageMeter()
@@ -155,18 +171,33 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples):
 		}
 		ckpt_dir = 'ckpts/{}'.format(dir_samples)
 		os.makedirs(ckpt_dir, exist_ok=True)
-		torch.save(state, ckpt_dir + '/best.pth.tar')
+		torch.save(state, '{}/{}_best_e{}.pth.tar'.format(ckpt_dir, dir_samples, epoch))
 		best_loss = loss_meter.avg
 
 	# Save samples and data
-	images = sample(net, num_samples, device)
-	os.makedirs(dir_samples, exist_ok=True)
+	images, latent_z = sample(net, num_samples, device)
+	os.makedirs(dir_samples+"/epoch_"+str(epoch), exist_ok=True)
+
+	# TODO: if net_type == 'densenet': num_samples = loowww (e.g.16)
+
 	images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
-	torchvision.utils.save_image(images_concat, '{}/epoch_{}.png'.format(dir_samples, epoch))
+	z_concat = torchvision.utils.make_grid(latent_z, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
+	torchvision.utils.save_image(images_concat, dir_samples+"/epoch_"+str(epoch)+'/x.png')
+	torchvision.utils.save_image(images_concat, dir_samples+"/epoch_"+str(epoch)+'/z.png')
+
+	import pickle
+	with open(dir_samples+"/epoch_"+str(epoch)+'/z.pkl', 'wb') as z_serialize:
+		pickle.dump(latent_z, z_serialize)
+
+
+	train_loss = args['train_loss']
+	train_bpd = args['train_bpd']
+	report = [epoch, loss_meter.avg, bpd_meter.avg] + [train_loss, train_bpd]
 
 	with open('{}/log'.format(dir_samples), 'a') as l:
-		report = ", ".join([str(m) for m in [epoch, loss_meter.avg, bpd_meter.avg]])
+		report = ", ".join([str(m) for m in report])
 		report += "\n"
+		print("\nWriting to disk:\n" + report + "\n At {}".format(dir_samples))
 		l.write(report)
 
 
@@ -174,21 +205,21 @@ def filter_args(arg_dict, arch_fields=None):
 	"""only pass to network architecture relevant fields."""
 	if not arch_fields:
 		arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'num_blocks']
-	return {k, v for k, v in arg_dicts if k in arch_fields}
+	return {k:arg_dict[k] for k in arch_fields if k in arg_dict}
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-	parser.add_argument('--gpu_ids', default='[0, 1]', type=eval, help='IDs of GPUs to use')
+	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 	parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
-	parser.add_argument('--dir_samples', default="real_samples_3_8_64", help="Directory for storing generated samples")
+	parser.add_argument('--dir_samples', default="test_2_8_32", help="Directory for storing generated samples")
 	# Hyperparameters
 	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
 	parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
-	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
+	parser.add_argument('--batch_size', default=256, type=int, help='Batch size')
 	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
 	parser.add_argument('--weight_decay', default=5e-5, type=float,
 											help='L2 regularization (only applied to the weight norm scale factors)')
@@ -197,9 +228,9 @@ if __name__ == '__main__':
 	parser.add_argument('--num_samples', default=100, type=int, help='Number of samples at test time')
 	# Architecture
 	parser.add_argument('--net_type', default='resnet', help='CNN architecture (resnet or densenet)')
-	parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
+	parser.add_argument('--num_scales', default=2, type=int, help='Real NVP multi-scale arch. recursions')
 	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
-	parser.add_argument('--mid_channels', default=64, type=int, help='N of feature maps for first resnet layer')
+	parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
 	parser.add_argument('--num_blocks', default=8, type=int, help='N of residual blocks in resnet')
 
 

@@ -14,14 +14,15 @@ class CouplingLayer(nn.Module):
 	"""Coupling layer in RealNVP.
 
 	Args:
-		in_channels (int): Number of channels in the input.
-		mid_channels (int): Number of channels in the `s` and `t` network.
+		in_c (int): Number of channels in the input.
+		mid_c (int): Number of channels in the `s` and `t` network.
 		num_blocks (int): Number of residual blocks in the `s` and `t` network.
 		mask_type (MaskType): One of `MaskType.CHECKERBOARD` or `MaskType.CHANNEL_WISE`.
 		reverse_mask (bool): Whether to reverse the mask. Useful for alternating masks.
+		net_type (str): densenet or resnet
 	"""
-	def __init__(self, in_channels, mid_channels, num_blocks, mask_type, reverse_mask,
-							net_type="resnet"):
+	def __init__(self, in_c, mid_c, num_blocks, mask_type, reverse_mask,
+							net_type=None, **kwargs):
 		super(CouplingLayer, self).__init__()
 
 		# Save mask info
@@ -30,19 +31,21 @@ class CouplingLayer(nn.Module):
 
 		# Build scale and translate network
 		if self.mask_type == MaskType.CHANNEL_WISE:
-			in_channels //= 2
+			in_c //= 2
 
+		print("Deploying " + net_type + " couplings.\n")
 		if net_type == "resnet":
 			from models.resnet import ResNet
-			self.st_net = ResNet(in_channels, mid_channels, 2 * in_channels,
+			self.st_net = ResNet(in_c, mid_c, 2 * in_c,
 							 num_blocks=num_blocks, kernel_size=3, padding=1,
 							 double_after_norm=(self.mask_type == MaskType.CHECKERBOARD))
-		# elif net_type == "densenet":
-		# 	from models.densenet import DenseNet
-		# 	self.st_net = DenseNet(
+		elif net_type == "densenet":
+			from models.densenet import DenseNet
+			# In the next line, not sure about: 2 * in_c 
+			self.st_net = DenseNet(in_c=in_c, mid_c=512, out_c=2*in_c)
 
 		# Learnable scale for s
-		self.rescale = nn.utils.weight_norm(Rescale(in_channels))
+		self.rescale = nn.utils.weight_norm(Rescale(in_c))
 
 	def forward(self, x, sldj=None, reverse=True):
 		if self.mask_type == MaskType.CHECKERBOARD:
@@ -78,7 +81,7 @@ class CouplingLayer(nn.Module):
 
 			st = self.st_net(x_id)
 			s, t = st.chunk(2, dim=1)
-			s = self.rescale(torch.tanh(s))
+			s = self.rescale(torch.tanh(s)) # scale s by tensor
 
 			# Scale and translate
 			if reverse:
