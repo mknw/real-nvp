@@ -26,7 +26,8 @@ class RealNVP(nn.Module):
 		super(RealNVP, self).__init__()
 		# Register data_constraint to pre-process images, not learnable
 		self.register_buffer('data_constraint', torch.tensor([0.9], dtype=torch.float32))
-
+		
+		print("Deploying " + kwargs['net_type'] + " couplings...")
 		self.flows = _RealNVP(0, **kwargs)
 
 	def forward(self, x, reverse=False):

@@ -36,6 +36,25 @@
 	- mid_channels == 128
 
 
+- March 10th, 21:00
+	- on `node078`
+	- net_type: densenet
+	- mid_channels: 256
+	- batch_size= 64
+	- n_scales: 3
+	- directory: data/densetest_3-128
+	- added GaussianNoise 
+	- Outcome: clear digits already at 40/47th epoch. 
+
+- March 11th, 21:00
+	- on `node069`
+	- net_type: densenet
+	- mid_channels: 128
+	- num_scales: 3
+	- batch_size: 256
+	- directory: data/rdense_3-128
+
+
 
 
 

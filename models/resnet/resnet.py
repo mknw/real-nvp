@@ -35,23 +35,25 @@ class ResNet(nn.Module):
 		self.out_conv = WNConv2d(mid_channels, out_channels, kernel_size=1, padding=0, bias=True)
 
 	def forward(self, x):
-		try:
-			x = self.in_norm(x) # FIND THIS MF
-		except RuntimeError:
-			import ipdb; ipdb.set_trace()
+		# try:
+		x = self.in_norm(x) # FIND THIS MF
+		# except RuntimeError:
+		# 	import ipdb; ipdb.set_trace()
 		if self.double_after_norm:
 			x *= 2.
+		# WORTH ATTENTION:
 		x = torch.cat((x, -x), dim=1)
 		x = F.relu(x)
-		try:
-			x = self.in_conv(x)
-		except:
-			import ipdb; ipdb.set_trace()
+		# try:
+		x = self.in_conv(x)
+		# except:
+		# 	import ipdb; ipdb.set_trace()
+		# WHY DOES THIS EXIST?
 		x_skip = self.in_skip(x)
 
 		for block, skip in zip(self.blocks, self.skips):
 			x = block(x)
-			x_skip += skip(x)
+			x_skip += skip(x) # TODO: try without self.skip() and inspect performance.
 
 		x = self.out_norm(x_skip)
 		x = F.relu(x)

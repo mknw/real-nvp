@@ -33,7 +33,6 @@ class CouplingLayer(nn.Module):
 		if self.mask_type == MaskType.CHANNEL_WISE:
 			in_c //= 2
 
-		print("Deploying " + net_type + " couplings.\n")
 		if net_type == "resnet":
 			from models.resnet import ResNet
 			self.st_net = ResNet(in_c, mid_c, 2 * in_c,
@@ -41,8 +40,8 @@ class CouplingLayer(nn.Module):
 							 double_after_norm=(self.mask_type == MaskType.CHECKERBOARD))
 		elif net_type == "densenet":
 			from models.densenet import DenseNet
-			# In the next line, not sure about: 2 * in_c 
-			self.st_net = DenseNet(in_c=in_c, mid_c=512, out_c=2*in_c)
+			self.st_net = DenseNet(in_c=in_c, mid_c=mid_c, out_c=2*in_c, 
+					                   depth=depth)
 
 		# Learnable scale for s
 		self.rescale = nn.utils.weight_norm(Rescale(in_c))
@@ -67,6 +66,7 @@ class CouplingLayer(nn.Module):
 			else:
 				exp_s = s.exp()
 				if torch.isnan(exp_s).any():
+					# import ipdb; ipdb.set_trace()
 					raise RuntimeError('Scale factor has NaN entries')
 				x = (x + t) * exp_s
 

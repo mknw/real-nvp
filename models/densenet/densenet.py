@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from util import WNConv2d
+
 
 UNIT_TESTING = False
 
@@ -32,31 +34,30 @@ class DenseLayer(nn.Module):
 		super().__init__()
 
 		conv1x1 = Conv2dAct(
-				in_c, in_c, kernel_size=1, stride=1,
-				padding=0, bias=True)
+				in_c, in_c, kernel_size=1, # stride=1, # since it's always 1.
+				padding=0, bias=False)
 
 		self.nn = torch.nn.Sequential(
 			conv1x1,
 			Conv2dAct(
-				in_c, growth, kernel_size=3, stride=1,
+				in_c, growth, kernel_size=3, # stride=1,
 				padding=1, bias=True),
 			)
+			# in_c, growth, kernel_size=3, # stride=1,
 
 	def forward(self, x):
 		h = self.nn(x)
-		#                       \__/
-		#                       (o-)   # your life is ending.
-		#                      //||\\
-		h = torch.cat([x, h], dim=1) # found the BUG!!!
+		h = torch.cat([x, h], dim=1) 
 		return h
 
 
 class DenseBlock(nn.Module):
 	def __init__(
-			self, in_c, out_c, kernel, Conv2dAct=Conv2dReLU, depth=8):
+			self, in_c, out_c, kernel, Conv2dAct, depth=8): # Conv2ReLU
 		# TODO: remove kernel in this module if it not needed.
+		# TODO: give `depth` argument to training script.
 		super().__init__()
-		depth = depth
+		# depth = depth
 
 		future_growth = out_c - in_c
 
@@ -79,7 +80,7 @@ class DenseBlock(nn.Module):
 
 class DenseNet(nn.Module):
 	def __init__(
-			self, in_c, mid_c, out_c, kernel_size=3):
+			self, in_c, mid_c, out_c, depth=8, kernel_size=3):
 		'''
 		DenseNet class for generative flow.
 		in_c: input channels (1 for grayscale imgs, 3 for rgb)
@@ -96,7 +97,7 @@ class DenseNet(nn.Module):
 				out_c=mid_c + in_c, # 512 + 1
 				kernel=kernel_size,
 				Conv2dAct=Conv2dAct,
-				depth=8)]
+				depth=depth)]
 
 		layers += [
 			torch.nn.Conv2d(mid_c + in_c, out_c, kernel_size, padding=1)
