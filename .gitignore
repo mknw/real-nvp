@@ -5,3 +5,5 @@ __pycache__
 data/
 logs/
 ckpts/
+
+train_mnist.py.0*
