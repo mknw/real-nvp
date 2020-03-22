@@ -19,152 +19,170 @@ import matplotlib.pyplot as plt
 
 def main(args):
 
-	# debugging option:
-	if args.net_type == 'densenet':
-		# torch.backends.cudnn.enabled = False
-		# torch.backends.cudnn.benchmark = True
-		# torch.backends.cudnn.deterministic = True
-		# args.num_samples = 42 # test this
-		# print("cudnn backend disabled, sampling n=42")
-		pass
-
-	# device = 'cuda' if torch.cuda.is_available() and len(args.gpu_ids) > 0 else 'cpu'
 	device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
 	print("evaluating on: %s" % device)
 
-	#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-
-	if args.dataset == 'MNIST':
-		transform_train = transforms.Compose([
-			transforms.ToTensor()
-			# transforms.ColorJitter(brightness=0.3)
-		])
-		#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-		transform_test = transforms.Compose([
-			transforms.ToTensor()
-		])
-
-		# trainset = torchvision.datasets.MNIST(root='data', train=True, download=True, transform=transform_train)
-		# trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-
-		testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform_test)
-		testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-
-		print('Building model..') 
-		# net = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8, **args.__dict__)
-		net = RealNVP( **filter_args(args.__dict__) )
-
-	elif args.dataset == 'CIFAR-10':
-		# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
-		transform_train = transforms.Compose([
-			transforms.RandomHorizontalFlip(),
-			transforms.ToTensor()
-		])
-		#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-		transform_test = transforms.Compose([
-			transforms.ToTensor()
-		])
-
-		trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
-		trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-
-		testset = torchvision.datasets.CIFAR10(root='data', train=False, download=True, transform=transform_test)
-		testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-
-		print('Building model..')
-		net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
-
-
-	net = net.to(device)
-	print()
-	print(device)
-	print()
-
-	if str(device).startswith('cuda'):
-		net = torch.nn.DataParallel(net, args.gpu_ids)
-		cudnn.benchmark = args.benchmark
-
 	# Load checkpoint.
-	model_epoch = randrange(120, 250)
+	'''model_epoch = randrange(120, 250)'''
 	model_epoch = 244
 	print('selected model at {}th epoch'.format(model_epoch))
 	args.dir_model = 'data/res_3-8-32/epoch_' + str(model_epoch)
-		
 
-	loss_fn = RealNVPLoss()
-	# param_groups = util.get_param_groups(net, args.weight_decay, norm_suffix='weight_g')
-	# optimizer = optim.Adam(param_groups, lr=args.lr, eps=1e-7)
-
-	# train_stats = train(epoch, net, trainloader, device, optimizer, loss_fn, args.max_grad_norm)
-	# test(epoch, net, testloader, device, loss_fn, args.num_samples, args.dir_samples)
-	# check if stats have been already pickled to args.dir_model + '/z_mean_std.pkl'
 	if os.path.isfile(args.dir_model + '/z_mean_std.pkl'):
 		print('Found cached file, skipping computations of mean and std for each digit.')
 		stats = torch.load(args.dir_model + '/z_mean_std.pkl')
 	else:
+		if args.dataset == 'MNIST':
+			transform_train = transforms.Compose([
+				transforms.ToTensor()
+				# transforms.ColorJitter(brightness=0.3)
+			])
+			#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
+			transform_test = transforms.Compose([
+				transforms.ToTensor()
+			])
+			# trainset = torchvision.datasets.MNIST(root='data', train=True, download=True, transform=transform_train)
+			# trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+			testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform_test)
+			testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+			print('Building model..') 
+			net = RealNVP( **filter_args(args.__dict__) )
+
+		elif args.dataset == 'CIFAR-10':
+			# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
+			transform_train = transforms.Compose([
+				transforms.RandomHorizontalFlip(),
+				transforms.ToTensor()
+			])
+			#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
+			transform_test = transforms.Compose([
+				transforms.ToTensor()
+			])
+			trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
+			trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+			testset = torchvision.datasets.CIFAR10(root='data', train=False, download=True, transform=transform_test)
+			testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+			print('Building model..')
+			net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
+
 		print('Loading model at ' + args.dir_model + '/model.pth.tar...')
 		assert os.path.isdir(args.dir_model), 'Error: no checkpoint directory found!'
 		checkpoint = torch.load(args.dir_model + '/model.pth.tar')
-		'''
-		# not sure how useful the next three lines are:::
-		global best_loss
-		best_loss = checkpoint['test_loss']
-		# we start epoch after the saved one (avoids overwrites).
-		start_epoch = checkpoint['epoch'] + 1
-		'''
-		try:
-			net.load_state_dict(checkpoint['net'])
-		except RuntimeError:
-			raise ArchError("There's a problem importing the model, check parameters.")
-		stats = track_distribution(net, testloader, device, loss_fn)
 
-	torch.save(stats, args.dir_model + '/z_mean_std.pkl')
-	scatter_alldigits(stats, args.dir_model + '/meanstds.png', model_epoch)
-	scatter_eachdigit(stats, args.dir_model + '/dig_subplots.png', model_epoch)
+		net = net.to(device);
+		if str(device).startswith('cuda'):
+			net = torch.nn.DataParallel(net, args.gpu_ids)
+			cudnn.benchmark = args.benchmark
+			'''
+			# not sure how useful the next three lines are:::
+			global best_loss
+			best_loss = checkpoint['test_loss']
+			# we start epoch after the saved one (avoids overwrites).
+			start_epoch = checkpoint['epoch'] + 1
+			'''
+			try:
+				net.load_state_dict(checkpoint['net'])
+			except RuntimeError: # RuntimeError: Error(s) in loading state_dict for DataParallel:
+				raise ArchError("There's a problem importing the model, check parameters.")
+
+			loss_fn = RealNVPLoss()
+			stats = track_distribution(net, testloader, device, loss_fn)
+			torch.save(stats, args.dir_model + '/z_mean_std.pkl')
+
+	# scatter_alldigits(stats, args.dir_model + '/meanstds.png', model_epoch)
+	# scatter_eachdigit(stats, args.dir_model + '/dig_subplots.png', model_epoch)
+	# violin_eachdigit(stats, args.dir_model + '/dig_violins.png', model_epoch)
+	distances = calculate_distance(stats)
+	heatmap(distances, args.dir_model + '/distances.png')
+
+
+def calculate_distance(stats, joint=False, measure=None):
+
+
+	distances = np.zeros(shape=(10, 10))
+
+	if joint:
+		joint_stats = []
+		stds, means = stats['std'], stats['mean']
+		for i, (std, mean) in enumerate(zip(stds, means)):
+			std_mean = np.concatenate((std, mean), axis=1)
+
+			for j, (std2, mean2) in enumerate(zip(stds, means)):
+				std_mean2 = np.concatenate((std2, mean2), axis=1)
+
+				min_rows = np.min((std_mean.shape[0], std_mean2.shape[0]))
+				distance = np.linalg.norm(std_mean[:min_rows] - std_mean2[:min_rows])
+				distances[i, j] = distance
+	else:
+		for i, m in enumerate(stats[measure]):
+			for j, n in enumerate(stats[measure]):
+				min_rows = np.min((m.shape[0], n.shape[0]))
+				distance = np.linalg.norm(m[:min_rows] - n[:min_rows])
+				distances[i, j] = distance
+
+
+	return distances
+
+def heatmap(square_mtx, filename):
+
+	digits = [i for i in range(10)]
+
+	fig, ax = plt.subplots()
+	# configure main plot
+	im = ax.imshow(square_mtx)
+	ax.set_xticks(digits)
+	ax.set_yticks(digits)
+	ax.set_xticklabels(digits)
+	ax.set_yticklabels(digits)
+
+	# annotate values within squares
+	for i in range(10):
+		for j in range(10):
+			text = ax.text(j, i, "{:.2f}".format(square_mtx[i, j]),
+					           ha='center', va='center', color='w')
+	
+	ax.set_title("magnitude of distance between digits stats")
+	fig.tight_layout()
+	plt.savefig(filename, bbox_inches='tight')
+
+
+
 
 def violin_eachdigit(stats, filename, m_epoch):
 	colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
 	          '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
 	          '#bcbd22', '#17becf']
+	digits = [i for i in range(10)]
 	stds, means = [stats['std'], stats['mean']]
-	# Steps to replicate for each subplot:
-	fig = plt.figure(figsize=(8, 10))
-	ax = fig.add_subplot()
 
+	# fig = plt.figure()
+	ax = fig.add_subplot()
 	plt.title('z space stats for model at epoch {}'.format(m_epoch))
-	plt.xlabel('mean')
-	plt.ylabel('std')
+	plt.ylabel('Average $z$ values')
+	plt.xlabel('Digits')
 	
 	# axs.set_title('Stats for epoch {} overview'.format(m_epoch))
-	dig = 0
-	for col in range(ncols):
-		for row in range(nrows):
-			axs[row, col].scatter(means[dig], stds[dig], c=colors[dig],
-					                  label=str(dig), alpha=.8, s=.8)
-			# TODO: Plot average of all means and stds (per category).
-			ctrd_x = np.mean(means[dig])
-			ctrd_y = np.mean(stds[dig])
-			axs[row, col].scatter(ctrd_x, ctrd_y, c=color_variant(colors[dig]))
-			axs[row,col].set_xlabel('mean')
-			axs[row,col].set_ylabel('std')
-			axs[row,col].annotate('$\mu$: {:.2f}\n$\sigma^2$: {:.2f}'.format(ctrd_x, ctrd_y), (ctrd_x, ctrd_y))
+	# 1. average std per digit
+	std_each_digit = [np.mean(std) for std in stds]
+	# 2. vector means for each digit
+	mean_each_digit = [np.mean(m) for m in means]
+	strings = ax.violinplot(dataset=means, positions=digits, showmedians=True, showextrema=False)
 
-			dig += 1
+	for i, b in enumerate(strings['bodies']):
+		b.set_facecolor(colors[i])
+		b.set_edgecolor(color_variant(colors[i]))
+		b.set_alpha(.6)
 
-		if dig == 10: break
-
-	fig.suptitle('Stats for epoch {} overview'.format(m_epoch))
+	'''
+	axs[row,col].annotate('$\mu$: {:.2f}\n$\sigma^2$: {:.2f}'.format(ctrd_x, ctrd_y), (ctrd_x, ctrd_y))
+	'''
+	# fig.suptitle('Stats for epoch {} overview'.format(m_epoch))
 	fig.tight_layout()
-	fig.subplots_adjust(top=.70) # .88
+	# fig.subplots_adjust(top=.70) # .88
 	#for dig in range(10):
 	#	plt.scatter(means[dig], stds[dig], c=colors[dig], label=str(dig), alpha=.8, s=.8)
 	plt.savefig(filename, bbox_inches='tight')
 	print('\nPlot saved to ' + filename)
-
-
-
-
-
 
 
 
@@ -389,7 +407,7 @@ class ArchError(Exception):
 def filter_args(arg_dict, desired_fields=None):
 	"""only pass to network architecture relevant fields."""
 	if not desired_fields:
-		desired_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'num_blocks']
+		desired_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'num_levels']
 	return {k:arg_dict[k] for k in desired_fields if k in arg_dict}
 
 
@@ -398,7 +416,7 @@ if __name__ == '__main__':
 
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
+	parser.add_argument('--gpu_ids', default='[0,1]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 	# dirs for save and load
 	# parser.add_argument('--dir_samples', default="data/restest", help="Directory for storing generated samples")
@@ -424,7 +442,7 @@ if __name__ == '__main__':
 	parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
 
 	# RESNET
-	parser.add_argument('--num_blocks', default=8, type=int, help='N of residual blocks in resnet')
+	parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet')
 
 
 	

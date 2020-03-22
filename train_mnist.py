@@ -16,22 +16,9 @@ from tqdm import tqdm
 
 def main(args):
 
-	# debugging option:
-	if args.net_type == 'densenet':
-		# torch.backends.cudnn.enabled = False
-		# torch.backends.cudnn.benchmark = True
-		# torch.backends.cudnn.deterministic = True
-		
-		# args.num_samples = 42 # test this
-		# print("cudnn backend disabled, sampling n=42")
-		pass
-
-	# device = 'cuda' if torch.cuda.is_available() and len(args.gpu_ids) > 0 else 'cpu'
 	device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
 	print("training on: %s" % device)
 	start_epoch = 0
-
-	#torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
 
 	if args.dataset == 'MNIST':
 		transform_train = transforms.Compose([
@@ -76,9 +63,6 @@ def main(args):
 
 
 	net = net.to(device)
-	print()
-	print(device)
-	print()
 
 	if str(device).startswith('cuda'):
 		net = torch.nn.DataParallel(net, args.gpu_ids)
@@ -86,7 +70,7 @@ def main(args):
 
 	if args.resume: # or not args.resume:
 		# Load checkpoint.
-		print('Resuming from checkpoint at' + args.dir_model + '/model.pth.tar...')
+		print('Resuming from checkpoint at ' + args.dir_model + '/model.pth.tar...')
 		assert os.path.isdir(args.dir_model), 'Error: no checkpoint directory found!'
 		checkpoint = torch.load(args.dir_model + '/model.pth.tar')
 		net.load_state_dict(checkpoint['net'])
@@ -109,11 +93,11 @@ def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
 	net.train()
 	loss_meter = util.AverageMeter()
 	bpd_meter = util.AverageMeter()
-	sv_idx = 0
 	with tqdm(total=len(trainloader.dataset)) as progress_bar:
 		for x, _ in trainloader:
 			x = x.to(device)
 			optimizer.zero_grad()
+			# import ipdb; ipdb.set_trace()
 			z, sldj = net(x, reverse=False)
 			loss = loss_fn(z, sldj)
 			loss_meter.update(loss.item(), x.size(0))
@@ -121,10 +105,8 @@ def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
 			util.clip_grad_norm(optimizer, max_grad_norm)
 			optimizer.step()
 			bpd_meter.update(util.bits_per_dim(x, loss_meter.avg))
-
 			progress_bar.set_postfix(loss=loss_meter.avg,
-															 bpd=bpd_meter.avg)
-			sv_idx += 1
+																bpd=bpd_meter.avg)
 			progress_bar.update(x.size(0))
 			#debugopt:
 	return {'train_loss': loss_meter.avg, 
@@ -171,20 +153,19 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
 				progress_bar.update(x.size(0))
 				#debugopt:
 				
-
 	# Save checkpoint
 	save_dir = dir_samples+"/epoch_"+str(epoch)
 	os.makedirs(save_dir, exist_ok=True)
 
 	if loss_meter.avg < best_loss or epoch % 10 == 0:
 	# if epoch > 40:
-		print('Saving...')
+		print('\nSaving...')
 		state = {
 			'net': net.state_dict(),
 			'test_loss': loss_meter.avg,
 			'epoch': epoch,
 		}
-		torch.save(state, save_dir + '/model.pth.tar')
+		torch.save(state, dir_samples+ '/model.pth.tar') # TODO: change dir_samples to model_dir
 		best_loss = loss_meter.avg
 
 	# Save samples and data
@@ -215,10 +196,10 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
 def filter_args(arg_dict, arch_fields=None):
 	"""only pass to network architecture relevant fields."""
 	if not arch_fields:
-		if arch['net_type'] == 'resnet':
-			arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'num_blocks']
-		elif arch['net_type'] == 'densenet':
-			arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'depth']
+		# if arg_dict['net_type'] == 'resnet':
+		arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'num_levels']
+		# elif arch['net_type'] == 'densenet':
+		# 	arch_fields = ['net_type', 'num_scales', 'in_channels', 'mid_channels', 'depth']
 	return {k:arg_dict[k] for k in arch_fields if k in arg_dict}
 
 
@@ -240,23 +221,43 @@ class GaussianNoise(object):
 		return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 
+
+class Normie(object):
+	'''class for normies'''
+	def __init__(self, min, max):
+		self.min = min
+		self.max = max
+
+	def __call__(self, tensor):
+		tensor -= tensor.min()
+		tensor /= tensor.max()
+		return tensor
+
+
 if __name__ == '__main__':
-	# import ipdb; ipdb.set_trace()
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
 	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
 	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
-	# dirs for save and load
-	parser.add_argument('--dir_samples', default="data/rdense_3-128", help="Directory for storing generated samples")
-	parser.add_argument('--dir_model', default="data/rdense_3-128/epoch_112", help="Directory for storing generated samples")
+	''' resnet dir_sample '''
+	parser.add_argument('--dir_samples', default="data/dense_test4", help="Directory for storing generated samples")
+	''' densenet dir_sample '''
+	# parser.add_argument('--dir_samples', default="data/2dense_3-8-128", help="Directory for storing generated samples")
+
+	# parser.add_argument('--dir_model', default="data/dense_3-16-128/epoch_50", help="Directory for storing generated samples")
+	# parser.add_argument('--dir_model', default="data/dense_test4/epoch___", help="Directory for storing generated samples")
+	parser.add_argument('--dir_model', default="data/dense_test/epoch_80", help="Directory for storing generated samples")
 	parser.add_argument('--resume', '-r', action='store_true', default=True, help='Resume from checkpoint')
+
 	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
+	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
 	# Hyperparameters
 	# training
+	# parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
 	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
-	parser.add_argument('--num_samples', default=128, type=int, help='Number of samples at test time')
+	parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
 
 	parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
 	parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
@@ -266,14 +267,17 @@ if __name__ == '__main__':
 	# Test
 
 	# General architecture parameters
-	parser.add_argument('--net_type', default='densenet', help='CNN architecture (resnet or densenet)')
-	parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
-	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
-	parser.add_argument('--mid_channels', default=128, type=int, help='N of feature maps for first resnet layer')
+	net = 'densenet'
+	parser.add_argument('--net_type', default=net, help='CNN architecture (resnet or densenet)')
 
-	# RESNET
-	parser.add_argument('--num_blocks', default=8, type=int, help='N of residual blocks in resnet')
-
+	if net == 'densenet':
+		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
+		parser.add_argument('--mid_channels', default=256, type=int, help='N of feature maps for first resnet layer')
+		parser.add_argument('--num_levels', default=16, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+	elif net == 'resnet':
+		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
+		parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
+		parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
 
 	
 	best_loss = 1500

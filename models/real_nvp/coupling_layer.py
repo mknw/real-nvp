@@ -21,7 +21,7 @@ class CouplingLayer(nn.Module):
 		reverse_mask (bool): Whether to reverse the mask. Useful for alternating masks.
 		net_type (str): densenet or resnet
 	"""
-	def __init__(self, in_c, mid_c, num_blocks, mask_type, reverse_mask,
+	def __init__(self, in_c, mid_c, num_levels, mask_type, reverse_mask,
 							net_type=None, **kwargs):
 		super(CouplingLayer, self).__init__()
 
@@ -36,12 +36,14 @@ class CouplingLayer(nn.Module):
 		if net_type == "resnet":
 			from models.resnet import ResNet
 			self.st_net = ResNet(in_c, mid_c, 2 * in_c,
-							 num_blocks=num_blocks, kernel_size=3, padding=1,
+							 num_blocks=num_levels, kernel_size=3, padding=1,
 							 double_after_norm=(self.mask_type == MaskType.CHECKERBOARD))
 		elif net_type == "densenet":
 			from models.densenet import DenseNet
 			self.st_net = DenseNet(in_c=in_c, mid_c=mid_c, out_c=2*in_c, 
-					                   depth=depth)
+					          depth=num_levels, double=(self.mask_type == MaskType.CHECKERBOARD))
+		else:
+			raise NotImplementedError('net type should be `resnet` or `densenet`')
 
 		# Learnable scale for s
 		self.rescale = nn.utils.weight_norm(Rescale(in_c))
@@ -66,7 +68,8 @@ class CouplingLayer(nn.Module):
 			else:
 				exp_s = s.exp()
 				if torch.isnan(exp_s).any():
-					# import ipdb; ipdb.set_trace()
+					import ipdb; ipdb.set_trace()
+					'''might have to normalize nn input in range [-1, 1]'''
 					raise RuntimeError('Scale factor has NaN entries')
 				x = (x + t) * exp_s
 

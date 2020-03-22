@@ -18,7 +18,7 @@ class RealNVP(nn.Module):
 		num_scales (int): Number of scales in the RealNVP model.
 		in_channels (int): Number of channels in the input.
 		mid_channels (int): Number of channels in the intermediate layers.
-		num_blocks (int): Number of residual blocks in the s and t network of
+		num_levels (int): Number of residual/dense blocks/layers in the s and t network of
 		`Coupling` layers.
 	"""
 	def __init__(self, **kwargs):
@@ -28,6 +28,7 @@ class RealNVP(nn.Module):
 		self.register_buffer('data_constraint', torch.tensor([0.9], dtype=torch.float32))
 		
 		print("Deploying " + kwargs['net_type'] + " couplings...")
+		#import ipdb; ipdb.set_trace()
 		self.flows = _RealNVP(0, **kwargs)
 
 	def forward(self, x, reverse=False):
@@ -58,15 +59,18 @@ class RealNVP(nn.Module):
 			- Dequantization: https://arxiv.org/abs/1511.01844, Section 3.1
 			- Modeling logits: https://arxiv.org/abs/1605.08803, Section 4.1
 		"""
+		# import ipdb; ipdb.set_trace()
 		y = (x * 255. + torch.rand_like(x)) / 256.
 		y = (2 * y - 1) * self.data_constraint
 		y = (y + 1) / 2
 		y = y.log() - (1. - y).log()
 
+
 		# Save log-determinant of Jacobian of initial transform
 		ldj = F.softplus(y) + F.softplus(-y) \
 			- F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
 		sldj = ldj.view(ldj.size(0), -1).sum(-1)
+
 
 		return y, sldj
 
@@ -82,7 +86,7 @@ class _RealNVP(nn.Module):
 		num_scales (int): Number of scales in the RealNVP model.
 		in_channels (int): Number of channels in the input.
 		mid_channels (int): Number of channels in the intermediate layers.
-		num_blocks (int): Number of residual blocks in the s and t network of
+		num_levels (int): Number of residual/dense blocks/layers in the s and t network of
 			`Coupling` layers.
 	"""
 	def __init__(self, scale_idx, **kwargs): 
@@ -91,7 +95,7 @@ class _RealNVP(nn.Module):
 		num_scales
 		in_channels
 		mid_channels
-		num_blocks
+		num_levels
 		net_type
 		'''
 
@@ -100,29 +104,30 @@ class _RealNVP(nn.Module):
 		self.__dict__.update(kwargs) # assign attribute to architecture recursion module. 
 
 		self.is_last_block = scale_idx == kwargs['num_scales'] - 1
+		print("building scale_n == {}".format(scale_idx))
 
 		self.in_couplings = nn.ModuleList([
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks,
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
 				            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type),
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks,
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
 				            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type),
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks, 
+			CouplingLayer(self.in_channels, self.mid_channels, self.num_levels, 
 				            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type)
 		])
 
 
 		if self.is_last_block:
 			self.in_couplings.append(
-				CouplingLayer(self.in_channels, self.mid_channels, self.num_blocks,
+				CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
 					            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type))
 		else:
 			# TODO move computations for in_ and mid_ channels here.
 			self.out_couplings = nn.ModuleList([
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks,
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
 					            MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type),
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks,
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
 					            MaskType.CHANNEL_WISE, reverse_mask=True, net_type=self.net_type),
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_blocks,
+				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
 					            MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type)
 			])
 			kwargs['in_channels'] *= 2 # increase number of input and output

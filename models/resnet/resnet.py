@@ -41,7 +41,7 @@ class ResNet(nn.Module):
 		# 	import ipdb; ipdb.set_trace()
 		if self.double_after_norm:
 			x *= 2.
-		# WORTH ATTENTION:
+		# WORTH ATTENTION: import ipdb; ipdb.set_trace()
 		x = torch.cat((x, -x), dim=1)
 		x = F.relu(x)
 		# try:
