@@ -139,7 +139,7 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
 	loss_meter = util.AverageMeter()
 	bpd_meter = util.AverageMeter()
 	with torch.no_grad():
-		with tqdm(total=len(testloader.dataset)) as progress_bar:
+		with tqdm(total=len(testloader.dataset)+1) as progress_bar:
 			for x, _ in testloader:
 				x = x.to(device)
 				z, sldj = net(x, reverse=False)
@@ -242,13 +242,11 @@ if __name__ == '__main__':
 	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 	''' resnet dir_sample '''
-	parser.add_argument('--dir_samples', default="data/dense_test4", help="Directory for storing generated samples")
 	''' densenet dir_sample '''
 	# parser.add_argument('--dir_samples', default="data/2dense_3-8-128", help="Directory for storing generated samples")
 
 	# parser.add_argument('--dir_model', default="data/dense_3-16-128/epoch_50", help="Directory for storing generated samples")
 	# parser.add_argument('--dir_model', default="data/dense_test4/epoch___", help="Directory for storing generated samples")
-	parser.add_argument('--dir_model', default="data/dense_test/epoch_80", help="Directory for storing generated samples")
 	parser.add_argument('--resume', '-r', action='store_true', default=True, help='Resume from checkpoint')
 
 	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
@@ -256,7 +254,6 @@ if __name__ == '__main__':
 	# Hyperparameters
 	# training
 	# parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
-	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
 	parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
 
 	parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
@@ -268,12 +265,22 @@ if __name__ == '__main__':
 
 	# General architecture parameters
 	net = 'densenet'
+	dir_ = 'dense_test4'
 	parser.add_argument('--net_type', default=net, help='CNN architecture (resnet or densenet)')
+	parser.add_argument('--dir_samples', default="data/" + dir_ , help="Directory for storing generated samples")
 
 	if net == 'densenet':
 		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
-		parser.add_argument('--mid_channels', default=256, type=int, help='N of feature maps for first resnet layer')
-		parser.add_argument('--num_levels', default=16, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+		if dir_ == 'dense_test':
+			parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
+			parser.add_argument('--mid_channels', default=128, type=int, help='N of feature maps for first resnet layer')
+			parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+			parser.add_argument('--dir_model', default="data/dense_test/epoch_80", help="Directory for storing generated samples")
+		elif dir_ == 'dense_test4':
+			parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
+			parser.add_argument('--mid_channels', default=256, type=int, help='N of feature maps for first resnet layer')
+			parser.add_argument('--num_levels', default=16, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+			parser.add_argument('--dir_model', default="data/dense_test4/epoch_60", help="Directory for storing generated samples")
 	elif net == 'resnet':
 		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
 		parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')

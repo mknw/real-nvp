@@ -14,6 +14,7 @@ from models import RealNVP, RealNVPLoss
 from tqdm import tqdm
 from random import randrange
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
@@ -28,9 +29,13 @@ def main(args):
 	print('selected model at {}th epoch'.format(model_epoch))
 	args.dir_model = 'data/res_3-8-32/epoch_' + str(model_epoch)
 
-	if os.path.isfile(args.dir_model + '/z_mean_std.pkl'):
+	''' stats filenames memo: '''
+	# '/z_mean_std.pkl'
+	# '/latent_mean_std_Z.pkl'
+	stats_filename = args.dir_model + '/zlatent_mean_std_Z.pkl'
+	if os.path.isfile(stats_filename) and not args.force:
 		print('Found cached file, skipping computations of mean and std for each digit.')
-		stats = torch.load(args.dir_model + '/z_mean_std.pkl')
+		stats = torch.load(stats_filename)
 	else:
 		if args.dataset == 'MNIST':
 			transform_train = transforms.Compose([
@@ -46,7 +51,6 @@ def main(args):
 			testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform_test)
 			testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 			print('Building model..') 
-			net = RealNVP( **filter_args(args.__dict__) )
 
 		elif args.dataset == 'CIFAR-10':
 			# Note: No normalization applied, since RealNVP expects inputs in (0, 1).
@@ -65,41 +69,158 @@ def main(args):
 			print('Building model..')
 			net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
 
-		print('Loading model at ' + args.dir_model + '/model.pth.tar...')
-		assert os.path.isdir(args.dir_model), 'Error: no checkpoint directory found!'
-		checkpoint = torch.load(args.dir_model + '/model.pth.tar')
-
-		net = net.to(device);
-		if str(device).startswith('cuda'):
-			net = torch.nn.DataParallel(net, args.gpu_ids)
-			cudnn.benchmark = args.benchmark
-			'''
-			# not sure how useful the next three lines are:::
-			global best_loss
-			best_loss = checkpoint['test_loss']
-			# we start epoch after the saved one (avoids overwrites).
-			start_epoch = checkpoint['epoch'] + 1
-			'''
-			try:
-				net.load_state_dict(checkpoint['net'])
-			except RuntimeError: # RuntimeError: Error(s) in loading state_dict for DataParallel:
-				raise ArchError("There's a problem importing the model, check parameters.")
-
-			loss_fn = RealNVPLoss()
-			stats = track_distribution(net, testloader, device, loss_fn)
-			torch.save(stats, args.dir_model + '/z_mean_std.pkl')
+		net = load_network( args.dir_model+'/model.pth.tar', device, args)
+		loss_fn = RealNVPLoss()
+		# stats = track_distribution(net, testloader, device, loss_fn)
+		stats = track_z(net, testloader, device, loss_fn)
+		torch.save(stats, stats_filename)
 
 	# scatter_alldigits(stats, args.dir_model + '/meanstds.png', model_epoch)
 	# scatter_eachdigit(stats, args.dir_model + '/dig_subplots.png', model_epoch)
 	# violin_eachdigit(stats, args.dir_model + '/dig_violins.png', model_epoch)
-	distances = calculate_distance(stats)
-	heatmap(distances, args.dir_model + '/distances.png')
+	''' distance analysis '''
+	# distances = calculate_distance(stats, joint=True)
+	# heatmap(distances, args.dir_model + '/distances.png')
+	# distances = calculate_distance(stats, measure='mean')
+	# heatmap(distances, args.dir_model + '/distances_mean.png',
+	# 		    plot_title='Average distance between digits in Z space (means)')
+	# distances = calculate_distance(stats, measure='std')
+	# heatmap(distances, args.dir_model + '/distances_std.png',
+	# 		    plot_title='Average distance between digits in Z space (std)')
+
+	all_nz = grand_z(stats)
+	net = load_network( args.dir_model+'/model.pth.tar', device, args)
+	x, z = sample_from_crafted_z(net, all_nz, kept=100, device=device,
+			                         save_dir=args.dir_model+'/art_x_100.png')
+	
+	# plot_grand_z(all_nz, args.dir_model + '/grand_zs.png')
+
+	# 1. take max over each grand_z
+	# 2. create standard gaussian replaced with grand_z.max() at given location
+	# 3. sample $x=f^{-1}(z)$ number (with more and more max thresholds).
+
+
+def test_arrays():
+	arr_1 = np.arange(24).reshape(2,3,4)
+	arr1 = arr_1[0,::2].copy()
+	arr2 = arr_1[1,1:].copy()
+	arr_1[0,::2] = arr2[:,::-1]
+	arr_1[1,1:] = arr1[:,::-1]
+	arr_3= np.zeros(shape=(arr_1.shape[0], 1, 3, 4))
+	arr_2 = np.zeros(shape=(arr_1.shape[0], 3, 4))
+	arr_2[:] = 99
+	return (arr_1, arr_2, arr_3)
+
+def replace_highest_along_axis(arr_1, arr_2, k=1):
+
+	arr_1, arr_2 = test_arrays()
+	# assert arr_1.size == arr_2.size, "Arrays mismatch"
+	arr_b = arr_1.reshape(arr_1.shape[0], -1)
+	maxk_b_ind = np.argpartition(arr_b, -k)[:, -k:] # without first :?
+	import ipdb; ipdb.set_trace()
+	maxk = np.take_along_axis(arr_b, maxk_b_ind, -1)
+
+	arr_2 = arr_2.reshape(arr_b.shape)
+	arr_2 = np.put_along_axis(arr_2, maxk_b_ind, maxk, -1) # channel dimension
+	return maxk_b_ind, maxk, arr_2
+
+
+def replace_highest(arr_1, arr_2, arr_3, k=1):
+	'''
+	Replaces values from arr_2 to arr_3, according to highest k values
+	in arr_1.
+	Input:
+		- arr_1: reference array to look up highest k values.
+		- arr_2: source array, to extract values from.
+		- arr_3: destination array, to inject values at given indices.
+	Output:
+		- arr_3 with vals from arr_2 at indices presenting arr_1 k-highest values. 
+	'''
+	# arr_1, arr_2, arr_3 = test_arrays()
+	assert arr_1.size == arr_3.size, "Arrays mismatch"
+	# 1. reshape with shape=(batch_size, H*W)
+	arr_b = arr_1.reshape(arr_1.shape[0], -1)
+	# 2. find indices for k highest values for each item along 1st dimension. 
+	maxk_b_ind= np.argpartition(arr_b, -k)[:, -k:]
+
+	# 3. flatten and unravel indices
+	maxk_ind_flat = maxk_b_ind.flatten() #<- LET OP: unravelling flattened inds.
+	maxk_ind_shape = np.unravel_index(maxk_ind_flat, arr_1.shape)
+	# unravel: form indices coordinates system references to: (arr_1.shape)
+	batch_indices = np.repeat(np.arange(arr_1.shape[0]), k) # (batch_size, k).
+	maxk_indices = tuple([batch_indices] + [ind for ind in maxk_ind_shape])
+
+	maxk = arr_2.reshape(arr_3.shape)[maxk_indices] # 3. resume this. 
+	arr_3[maxk_indices] = maxk
+	return maxk_indices, maxk, arr_3
+
+def craft_z(nd_array, kept=None, fold=False, device="cuda:0"):
+	''' Create z's from average, but with gaussian noise.
+	Inputs:
+		- nd_array: number-digits array with grand average of all z's spaces.
+		- kept: integer or float. If integer, equals number of pixels to be kept
+		                          if float, and fold=True, equals proportion of 
+		                          pixels to be kept.
+		- fold: dictates whether kept is read as absolute pixels count, or proportion.
+	Outputs:
+		- Artificial Z's for each digit. 
+	'''
+	mean = np.mean(nd_array) # should be ~= 0.
+	abs_diff = np.abs(nd_array - mean)
+
+	batch_size = nd_array.shape[0] # 10
+	batch = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device='cpu').numpy() # TODO: CHANGE 'CPU'
+	_, _, batch = replace_highest(abs_diff, nd_array, batch.copy(), kept)
+	return batch
+
+
+
+
+def sample_from_crafted_z(net, all_nz, kept, device, save_dir):
+	''' 
+	Input:
+		ndarray: n-dimensional but also number digit array.
+	Output: plot.
+	'''
+	z = craft_z(all_nz, kept=kept)
+	z = torch.from_numpy(z).to(device)
+	x, _ = net(z, reverse=True)
+	x = torch.sigmoid(x)
+	
+	images_concat = torchvision.utils.make_grid(x, nrow=4)
+	torchvision.utils.save_image(images_concat, save_dir)
+	return x, z
+
+def plot_grand_z(ndarray, filename):
+	# mpl.rc('text', usetex=True)
+	# mpl.rcParams['text.latex.preamble']=[r"\boldmath"]
+
+	n_rows, n_cols = (2, 5)
+	fig, axs = plt.subplots(n_rows, n_cols, sharex='all', sharey='all', figsize=(10, 7))
+
+	n = 0
+	for col in range(n_cols):
+		for row in range(n_rows):
+			axs[row, col].imshow(ndarray[n])
+			ttl = r"Grand ${{z}}$ for {}".format(n)
+			# import ipdb; ipdb.set_trace()
+			axs[row, col].title.set_text(ttl)
+			n += 1
+	
+	fig.suptitle("Grand $bold{z}$ for each digit")
+	fig.tight_layout()
+	plt.savefig(filename, bbox_inches='tight')
+	print('\nPlot saved to ' + filename)
+	
 
 
 def calculate_distance(stats, joint=False, measure=None):
 
 
 	distances = np.zeros(shape=(10, 10))
+
+	if joint and measure:
+		raise ValueError("set either joint or measure argument, not both.")
 
 	if joint:
 		joint_stats = []
@@ -123,13 +244,19 @@ def calculate_distance(stats, joint=False, measure=None):
 
 	return distances
 
-def heatmap(square_mtx, filename):
+def heatmap(square_mtx, filename, plot_title="Magnitude of distance between digits"):
 
 	digits = [i for i in range(10)]
 
 	fig, ax = plt.subplots()
 	# configure main plot
-	im = ax.imshow(square_mtx)
+	# show img, removing 0's to center color palette distribution. 
+	norm_sq_mtx = square_mtx.copy()
+	norm_sq_mtx[ np.array(digits),np.array(digits) ] = None
+	norm_sq_mtx -= np.nanmin(norm_sq_mtx)
+	norm_sq_mtx /= np.nanmax(norm_sq_mtx)
+	im = ax.imshow(norm_sq_mtx, cmap="plasma")
+
 	ax.set_xticks(digits)
 	ax.set_yticks(digits)
 	ax.set_xticklabels(digits)
@@ -138,10 +265,15 @@ def heatmap(square_mtx, filename):
 	# annotate values within squares
 	for i in range(10):
 		for j in range(10):
-			text = ax.text(j, i, "{:.2f}".format(square_mtx[i, j]),
-					           ha='center', va='center', color='w')
+			if i != j:
+				val = norm_sq_mtx[i, j]
+				col = 'w' if val < 0.6 else 'b'
+				text = ax.text(j, i, "{:.2f}".format(square_mtx[i, j]),
+						           ha='center', va='center', color=col)
+			else:
+				break
 	
-	ax.set_title("magnitude of distance between digits stats")
+	ax.set_title(plot_title)
 	fig.tight_layout()
 	plt.savefig(filename, bbox_inches='tight')
 
@@ -256,6 +388,23 @@ def scatter_alldigits(stats, filename, m_epoch):
 
 
 
+def grand_z(stats, filename=None, epoch_n=244):
+
+	zspace = stats['z']
+	
+
+	for n in range(10):
+		n_z = zspace[n]
+		grand_nz = np.mean(n_z, axis=0)
+		if 'all_nz' not in dir():
+			all_nz = grand_nz
+		else:
+			all_nz = np.concatenate((all_nz, grand_nz))
+	
+	return all_nz
+	
+
+
 def track_distribution(net, loader, device, loss_fn, **kwargs):
 
 
@@ -263,6 +412,8 @@ def track_distribution(net, loader, device, loss_fn, **kwargs):
 	loss_meter = util.AverageMeter()
 	bpd_meter = util.AverageMeter()
 	
+	# TODO - add:
+	#with torch.nograd():
 	with tqdm(total=len(loader.dataset)) as progress:
 
 		digits_stds = [np.array([]).reshape(0, 1) for i in range(10)]
@@ -271,12 +422,13 @@ def track_distribution(net, loader, device, loss_fn, **kwargs):
 		for x, y in loader:
 			x = x.to(device)
 			z, sldj = net(x, reverse=False)
-			mean_z = z.mean(dim=[1,2,3]) # `1` is channel.
-			std_z = z.std(dim=[1,2,3])
+			mean_z = z.mean(dim=1) # `1` is channel.
+			std_z = z.std(dim=1)
 
 			for digit in range(10):
 				dig_std_z = std_z[ (y==digit).nonzero() ]
 				dig_mean_z = mean_z[ (y==digit).nonzero() ]
+				# here we concatenate each 'column array' to previous one (or initialized arr. of size=(0, 1)).
 				digits_stds[digit] = np.concatenate(( digits_stds[digit], dig_std_z.to('cpu').detach().numpy() ))
 				digits_means[digit] = np.concatenate(( digits_means[digit], dig_mean_z.to('cpu').detach().numpy() ))
 
@@ -291,6 +443,52 @@ def track_distribution(net, loader, device, loss_fn, **kwargs):
 	
 	return {'std': digits_stds, 'mean': digits_means}
 
+
+def track_z(net, loader, device, loss_fn, **kwargs):
+
+	net.eval()
+	loss_meter = util.AverageMeter()
+	bpd_meter = util.AverageMeter()
+	
+	with tqdm(total=len(loader.dataset)) as progress:
+
+		digits_stds = [np.array([]).reshape(0, 1) for i in range(10)]
+		digits_means = [np.array([]).reshape(0, 1) for i in range(10)]
+
+		''' not quite but useful for reference. '''
+		digits_z = [np.array([]).reshape(0, 1, 28, 28) for i in range(10)]
+
+		for x, y in loader:
+			x = x.to(device)
+			z, sldj = net(x, reverse=False)
+			mean_z = z.mean(dim=[1, 2, 3]) # `1` is channel.
+			std_z = z.std(dim=[1, 2, 3])
+
+			for n in range(10):
+				# check if concatenation axis needs to be specified for ZZZZ.
+				digit_indices = (y==n).nonzero()
+				digit_indices_1dim = (y==n).nonzero(as_tuple=True)
+				dig_std_z = std_z[ digit_indices ]
+				dig_mean_z = mean_z[ digit_indices ]
+				z_dig = z[digit_indices_1dim]
+				# here we concatenate each 'array' to the previous one (or initialized arr. of size=(0, 1)).
+				digits_stds[n] = np.concatenate(( digits_stds[n], dig_std_z.to('cpu').detach().numpy() ))
+				digits_means[n] = np.concatenate(( digits_means[n], dig_mean_z.to('cpu').detach().numpy() ))
+				# concatenate whole z space. 
+				''' here z_dig.shape == (10, 1, 1, 28, 28) '''
+				# account for that thing!^^^!
+				digits_z[n] = np.concatenate(( digits_z[n], z_dig.to('cpu').detach().numpy() ))
+
+			loss = loss_fn(z, sldj)
+			loss_meter.update(loss.item(), x.size(0))
+			bpd_meter.update(util.bits_per_dim(x, loss_meter.avg), x.size(0))
+
+			progress.set_postfix(loss=loss_meter.avg, 
+					                 bpd=bpd_meter.avg)
+			progress.update(x.size(0))
+	# add loss.avg() and bpd.avg() somewhere in the plot. 
+	
+	return {'std': digits_stds, 'mean': digits_means, 'z': digits_z}
 
 def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
 	print('\nEpoch: %d' % epoch)
@@ -394,6 +592,23 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
 		print("\nWriting to disk:\n" + report + "At {}".format(dir_samples))
 		l.write(report)
 
+def load_network(model_dir, device, args):
+
+	net = RealNVP( **filter_args(args.__dict__) )
+	# assert os.path.isdir(model_dir), 'Error: no checkpoint directory found.'
+	checkpoint = torch.load(model_dir)
+	net = net.to(device)
+	
+	if str(device).startswith('cuda'):
+		net = torch.nn.DataParallel(net, args.gpu_ids)
+		cudnn.benchmark = args.benchmark
+		try:
+			net.load_state_dict(checkpoint['net'])
+		except RuntimeError:
+			raise ArchError('There is a problem importing the mode, check parameters.')
+
+	return net
+
 
 class ArchError(Exception):
 	def __init__(self, expression, message):
@@ -414,38 +629,21 @@ def filter_args(arg_dict, desired_fields=None):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
-	# test_batch_size = 1000 # ?
 	parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-	parser.add_argument('--gpu_ids', default='[0,1]', type=eval, help='IDs of GPUs to use')
+	parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
 	parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
-	# dirs for save and load
-	# parser.add_argument('--dir_samples', default="data/restest", help="Directory for storing generated samples")
 	# parser.add_argument('--dir_model', default="data/res_____/epoch_199", help="Directory for storing generated samples")
-	# parser.add_argument('--resume', '-r', action='store_true', default=False, help='Resume from checkpoint')
 	parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
-	# Hyperparameters
-	# training
-	parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
-	parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
-
-	parser.add_argument('--num_epochs', default=1, type=int, help='Number of epochs to train')
-	# parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
-	# parser.add_argument('--weight_decay', default=5e-5, type=float,
-											# help='L2 regularization (only applied to the weight norm scale factors)')
-	# parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
-	# Test
+	parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
+	# parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
+	parser.add_argument('--force', '-f', action='store_true', default=False, help='Re-run z-space anal-yses.')
 
 	# General architecture parameters
 	parser.add_argument('--net_type', default='resnet', help='CNN architecture (resnet or densenet)')
 	parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
 	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
 	parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
-
-	# RESNET
 	parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet')
 
-
-	
-	# best_loss = 0
 
 	main(parser.parse_args())
