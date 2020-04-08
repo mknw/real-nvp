@@ -154,10 +154,10 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
 				#debugopt:
 				
 	# Save checkpoint
-	save_dir = dir_samples+"/epoch_"+str(epoch)
+	save_dir = dir_samples + '/epoch_{:03d}'.format(epoch) #  + str(epoch)
 	os.makedirs(save_dir, exist_ok=True)
 
-	if loss_meter.avg < best_loss or epoch % 10 == 0:
+	if loss_meter.avg < best_loss or epoch % 10 == 0 or epoch > 100:
 	# if epoch > 40:
 		print('\nSaving...')
 		state = {
@@ -165,7 +165,7 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
 			'test_loss': loss_meter.avg,
 			'epoch': epoch,
 		}
-		torch.save(state, dir_samples+ '/model.pth.tar') # TODO: change dir_samples to model_dir
+		torch.save(state, save_dir + '/model.pth.tar')
 		best_loss = loss_meter.avg
 
 	# Save samples and data
@@ -265,24 +265,23 @@ if __name__ == '__main__':
 
 	# General architecture parameters
 	net = 'densenet'
-	dir_ = 'dense_test4'
+	dir_ = 'dense_test6'
 	parser.add_argument('--net_type', default=net, help='CNN architecture (resnet or densenet)')
 	parser.add_argument('--dir_samples', default="data/" + dir_ , help="Directory for storing generated samples")
 
+	parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
 	if net == 'densenet':
-		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
-		if dir_ == 'dense_test':
+		if dir_ == 'dense_test5':
 			parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
 			parser.add_argument('--mid_channels', default=128, type=int, help='N of feature maps for first resnet layer')
 			parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-			parser.add_argument('--dir_model', default="data/dense_test/epoch_80", help="Directory for storing generated samples")
-		elif dir_ == 'dense_test4':
-			parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
-			parser.add_argument('--mid_channels', default=256, type=int, help='N of feature maps for first resnet layer')
-			parser.add_argument('--num_levels', default=16, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-			parser.add_argument('--dir_model', default="data/dense_test4/epoch_60", help="Directory for storing generated samples")
+			parser.add_argument('--dir_model', default="data/dense_test5/epoch_xx", help="Directory for storing generated samples")
+		elif dir_ == 'dense_test6':
+			parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
+			parser.add_argument('--mid_channels', default=120, type=int, help='N of feature maps for first resnet layer')
+			parser.add_argument('--num_levels', default=10, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+			parser.add_argument('--dir_model', default="data/dense_test6/epoch_209", help="Directory for storing generated samples")
 	elif net == 'resnet':
-		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
 		parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
 		parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
 

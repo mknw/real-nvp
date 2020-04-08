@@ -88,16 +88,51 @@ def main(args):
 	# heatmap(distances, args.dir_model + '/distances_std.png',
 	# 		    plot_title='Average distance between digits in Z space (std)')
 
+	'''
 	all_nz = grand_z(stats)
 	net = load_network( args.dir_model+'/model.pth.tar', device, args)
+	# z = craft_z(all_nz, kept=3)
 	x, z = sample_from_crafted_z(net, all_nz, kept=100, device=device,
 			                         save_dir=args.dir_model+'/art_x_100.png')
+	'''
 	
 	# plot_grand_z(all_nz, args.dir_model + '/grand_zs.png')
 
-	# 1. take max over each grand_z
-	# 2. create standard gaussian replaced with grand_z.max() at given location
-	# 3. sample $x=f^{-1}(z)$ number (with more and more max thresholds).
+def PCA_eig_np(x, k, center=True, scale=False):
+	'''
+	https://medium.com/@ravikalia/pca-done-from-scratch-with-python-2b5eb2790bfc
+	'''
+	import ipdb; ipdb.set_trace()
+	n, p = x.shape
+	ones = np.ones([n, 1])
+	# subtract from each column its mean, to ensure mean = 0.
+	h = ((1/n) * np.matmul(ones, ones.T)) if center else np.zeros([n, n])
+	H = np.eye(n) - h
+	X_center = np.matmul(H, X)
+	covar = 1/(n-1) * np.matmul(X_center.T, C_center)
+	# divide each column by its std. Only if outcome is independent of variance.
+	scaling = np.sqrt(1/np.diag(covariance)) if scale else np.ones(p)
+	scaled_covariance = np.matmul(np.diag(scaling), covariance)
+	w, v = np.linalg.eig(scaled_covariance)
+	components = v[:, :k]
+	explained_variance = w[:k]
+	return {'x': X, 'k': k, 'components': components,
+			            'explained variance': explained_variance}
+
+def PCA_test(dataset):
+	# 1. load MNIST
+	# 2. 
+	from sklearn.decomposition import PCA
+	
+	p = dataset.shape[1]
+	k = p
+	X_reduced = PCA(n_components=k).fit(dataset) # dataset.data
+	X_reduced_eig = PCA_eig_np(dataset, k)
+	comp_diff = np.round(np.abs(X_reduced.components_) - np.abs(X_reduced_eig['components'].T), 3)
+	print("Components: ", np.array_equal(comp_diff, np.zeros([p, p])))
+	var_diff = np.round(X_reduced.explained_variance_ - X_reduced_eig['explained_variance'], 3)
+	print("Exp. Variance: ", np.array_equal(var_diff, np.zeros(k)))
+	return
 
 
 def test_arrays():
@@ -111,17 +146,23 @@ def test_arrays():
 	arr_2[:] = 99
 	return (arr_1, arr_2, arr_3)
 
-def replace_highest_along_axis(arr_1, arr_2, k=1):
+def replace_highest_along_axis(arr_ref, arr_2, arr_3, k=1):
 
-	arr_1, arr_2 = test_arrays()
-	# assert arr_1.size == arr_2.size, "Arrays mismatch"
-	arr_b = arr_1.reshape(arr_1.shape[0], -1)
-	maxk_b_ind = np.argpartition(arr_b, -k)[:, -k:] # without first :?
-	import ipdb; ipdb.set_trace()
-	maxk = np.take_along_axis(arr_b, maxk_b_ind, -1)
+	assert arr_ref.shape[0] % arr_2.shape[0] != 0, "Arrays mismatch"
+	# arr_ref, arr_2, arr_3 = test_arrays()
+	arr_3 = np.concatenate([arr_3, arr_3])
 
-	arr_2 = arr_2.reshape(arr_b.shape)
-	arr_2 = np.put_along_axis(arr_2, maxk_b_ind, maxk, -1) # channel dimension
+	reps = arr_3.shape[0] // arr_2.shape[0] # repetitions.
+	arr_ref_fb = arr_ref.reshape(arr_ref.shape[0], -1)
+	maxk_b_ind = np.argpartition(arr_ref_fb, -k)[:, -k:] # without first :?
+	maxk = np.take_along_axis(arr_2.reshape(arr_2.shape[0], -1), maxk_b_ind, -1)
+
+	if reps > 1:
+		maxk = maxk.repeat(reps, axis=0)
+		maxk_b_ind = maxk_b_ind.repeat(reps, axis=0)
+
+	# arr_3 = arr_3.reshape(arr_ref_fb.shape, -1)
+	np.put_along_axis(arr_3.reshape(arr_3.shape[0], -1), maxk_b_ind, maxk, -1) # channel dimension
 	return maxk_b_ind, maxk, arr_2
 
 
@@ -154,7 +195,7 @@ def replace_highest(arr_1, arr_2, arr_3, k=1):
 	arr_3[maxk_indices] = maxk
 	return maxk_indices, maxk, arr_3
 
-def craft_z(nd_array, kept=None, fold=False, device="cuda:0"):
+def craft_z(grand_zs, kept=None, fold=False, device="cuda:0"):
 	''' Create z's from average, but with gaussian noise.
 	Inputs:
 		- nd_array: number-digits array with grand average of all z's spaces.
@@ -165,15 +206,13 @@ def craft_z(nd_array, kept=None, fold=False, device="cuda:0"):
 	Outputs:
 		- Artificial Z's for each digit. 
 	'''
-	mean = np.mean(nd_array) # should be ~= 0.
-	abs_diff = np.abs(nd_array - mean)
+	mean = np.mean(grand_zs) # should be ~= 0.
+	abs_diff = np.abs(grand_zs - mean)
 
-	batch_size = nd_array.shape[0] # 10
+	batch_size = grand_zs.shape[0] # 10
 	batch = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device='cpu').numpy() # TODO: CHANGE 'CPU'
-	_, _, batch = replace_highest(abs_diff, nd_array, batch.copy(), kept)
+	_, _, batch = replace_highest_along_axis(abs_diff, grand_zs, batch.copy(), kept)
 	return batch
-
-
 
 
 def sample_from_crafted_z(net, all_nz, kept, device, save_dir):
@@ -639,11 +678,13 @@ if __name__ == '__main__':
 	parser.add_argument('--force', '-f', action='store_true', default=False, help='Re-run z-space anal-yses.')
 
 	# General architecture parameters
+	net_type = 'resnet'
 	parser.add_argument('--net_type', default='resnet', help='CNN architecture (resnet or densenet)')
-	parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
-	parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
-	parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
-	parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet')
+	if net_type == 'resnet':
+		parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
+		parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
+		parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
+		parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet')
 
 
 	main(parser.parse_args())
