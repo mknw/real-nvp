@@ -1,41 +1,42 @@
 #!/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
 
-import argparse
-import os
 import torch 
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 import torch.utils.data as data
 import torchvision
 import torchvision.transforms as transforms
-import util
 
+import util
+import argparse
+import os
+import numpy as np
 from models import RealNVP, RealNVPLoss
 from tqdm import tqdm
 from random import randrange
-import numpy as np
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 from umap import UMAP
 
 
 def main(args):
-
     device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
     print("evaluating on: %s" % device)
 
-    # Load checkpoint.
-    '''model_epoch = randrange(120, 250)'''
-    model_epoch = 244
-    print('selected model at {}th epoch'.format(model_epoch))
-    args.dir_model = 'data/res_3-8-32/epoch_' + str(model_epoch)
+    # select model.
+    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version) #, test=244)
 
+    mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
+
+    epoch = fp_model_root.split('_')[-1]
     ''' stats filenames memo: '''
-    # '/z_mean_std.pkl'
-    # '/latent_mean_std_Z.pkl'
-    stats_filename = args.dir_model + '/zlatent_mean_std_Z.pkl'
+    # 1: '/z_mean_std.pkl'
+    # 2: '/latent_mean_std_Z.pkl'
+    stats_filename = fp_model_root + '/zlatent_mean_std_Z.pkl'
     if os.path.isfile(stats_filename) and not args.force:
-        print('Found cached file, skipping computations of mean and std for each digit.')
+        print('Found cached file, skipping computations of mean and std.')
         stats = torch.load(stats_filename)
     else:
         if args.dataset == 'MNIST':
@@ -70,55 +71,80 @@ def main(args):
             print('Building model..')
             net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
 
-        net = load_network( args.dir_model+'/model.pth.tar', device, args)
+        net = load_network( fp_model, device, args)
         loss_fn = RealNVPLoss()
         # stats = track_distribution(net, testloader, device, loss_fn)
         stats = track_z(net, testloader, device, loss_fn)
         torch.save(stats, stats_filename)
 
-    # scatter_alldigits(stats, args.dir_model + '/meanstds.png', model_epoch)
-    # scatter_eachdigit(stats, args.dir_model + '/dig_subplots.png', model_epoch)
-    # violin_eachdigit(stats, args.dir_model + '/dig_violins.png', model_epoch)
-    ''' distance analysis '''
-    # distances = calculate_distance(stats, joint=True)
-    # heatmap(distances, args.dir_model + '/distances.png')
-    # distances = calculate_distance(stats, measure='mean')
-    # heatmap(distances, args.dir_model + '/distances_mean.png',
-    # 		    plot_title='Average distance between digits in Z space (means)')
-    # distances = calculate_distance(stats, measure='std')
-    # heatmap(distances, args.dir_model + '/distances_std.png',
-    # 		    plot_title='Average distance between digits in Z space (std)')
-
-    # '''
-    all_nz = grand_z(stats)
-    net = load_network( args.dir_model+'/model.pth.tar', device, args)
-    # z = craft_z(all_nz, kept=3)
-    fp = args.dir_model+'/replace_from_grandz'
-    x, z = sample_from_crafted_z(net, all_nz, absolute=True, kept=500, device=device, reps=10,
-                                     save_dir=fp, monster_mode=True)
-    # '''
-    # plot_grand_z(all_nz, args.dir_model + '/grand_zs.png')
+    ''' filepaths '''
+    fp_distr = fp_model_root + '/distr' # distributions
+    fp_simil = fp_model_root + '/similarity' # similarity
+    fp_replace = fp_model_root+'/replace_from_grandz'
+    fp_pca = fp_model_root + '/pca'
+    [os.makedirs(ppp, exist_ok=True) for ppp in [fp_distr, fp_simil, fp_replace, fp_pca]]
     
-    # for method in ['sklearn']: # , 'self']:
-        # PCs = PCA_test(stats, k=100, center=True, mode=method)
-        # fn = args.dir_model + '/pca/pca_{}.png'.format(method)
-        # plot_PCA(comp_var['components'], comp_var['exp_var'], filename=fn)
-        # fn = args.dir_model + '/pca/pcaVE_{}.png'.format(method)
-        # plot_expvar(comp_var['exp_var'], fn)
-        # fn = args.dir_model + '/pca/PCgrid_{}.png'.format(method)
-        # plot_PCgrid(PCs, fn)
+    
+    ''' distributions analyses '''
+    print("analysing z distribution... ")
+    scatter_alldigits(stats, fp_distr + '/meanstds.png', epoch)
+    scatter_eachdigit(stats, fp_distr + '/dig_subplots.png', epoch)
+    violin_eachdigit(stats, fp_distr + '/dig_violins.png', epoch)
+    ''' distance analysis '''
+    distances = calculate_distance(stats, joint=True)
+    heatmap(distances, fp_simil + '/distances.png')
+    distances = calculate_distance(stats, measure='mean')
+    heatmap(distances, fp_simil + '/distances_mean.png',
+                plot_title='Average distance between digits in Z space (means)')
+    distances = calculate_distance(stats, measure='std')
+    heatmap(distances, fp_simil + '/distances_std.png',
+                plot_title='Average distance between digits in Z space (std)')
 
-    # PCs = PCA_test(stats, k=100, center=True, mode='sklearn')
+    distances = y_distance_z(stats)
+    measure = 'mean'
+    for m in range(distances.shape[0]):
+        heatmap(distances[m], fp_simil + f'/pixelwise_dist_{measure}.png',
+                                 plot_title=f'pixelwise {measure} similarity')
+        measure = 'std'
 
-    '''
-    fn_prefix = args.dir_model + '/umap'
+    all_nz = grand_z(stats)
+    if 'net' not in dir():
+        net = load_network( fp_model, device, args)
+    # z=craft_z(all_nz,kept=3) #helper function, included in sample_from_crafted_z.
+    for k in [5, 10, 25, 50, 100, 200]:
+        sample_from_crafted_z(net, all_nz, absolute=True, kept=k, device=device, reps=10,
+                                     save_dir=fp_replace) #monster_mode=True)
+    # overall Z for each digit (averaged across batches).
+    plot_grand_z(all_nz, fp_model_root + '/grand_zs.png')
+    
 
-    for nn in [7, 10, 15, 20, 30, 50, 80, 100]:
-        for md in np.linspace(0, 1, 11):
-            for d in [3, 2]:
-                test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md, n_components=d)
-    '''
+    ''' dimensionality reduction '''
+    # PCA
+    for method in ['sklearn']: # 'self']:
+        PCs = PCA_test(stats['z'], k=5, center=True, mode=method)
+        fn = fp_pca + '/pca_{}.png'.format(method)
+        plot_PCA(PCs, filename=fn)
+        fn = fp_pca + '/pcaVE_{}.png'.format(method)
+        plot_expvar(PCs['exp_var'], fn)
+        fn = fp_pca + '/PCgrid_{}.png'.format(method)
+        plot_PCgrid(PCs, fn)
+        fn = fp_pca + '/reduced_z.png'
+        plot_reconstructed_PCA(PCs, fn)
 
+    # UMAP -- `test_umap` will use directories `<fp_model_root>/umap/{,3d}`
+    fn_prefix = fp_model_root + '/umap'
+    os.makedirs(fn_prefix+'/3d', exist_ok=True)
+
+    for nn in [7, 10, 15, 20]:
+        # add option to reduce nn for 3d. 
+        dims = [2, 3] if (nn % 10 == 0) else [2]
+        for md in range(0, 10, 2):
+            for d in dims:
+                test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md*0.1, n_components=d)
+
+    mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
+
+    return
 
 
 def issue_z_from_pc(PC, stats, filename):
@@ -126,37 +152,45 @@ def issue_z_from_pc(PC, stats, filename):
     z_s = grand_z(stats)
     z_s = z_s.reshape(z_s.shape[0], -1)
     components = PC['components']
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
     for i in range(10):
+        
+        print('h'+i)
         # every N
         for c in components:
             # every PC
             pass
     pass
 
-def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2, metric='euclidean',
-                   **kwargs):
-    change_index = [z.shape[0] for z in stats['z']] # + 1 digit [0-9]
+def label_zs(z_s):
+    ''' Arg:
+        z_s list of ndarrays '''
+    change_index = [z.shape[0] for z in z_s] # + 1 digit [0-9]
     # Prepare dataset:
     n_datapoints = np.sum(change_index)
     assert n_datapoints == 10000
-    dataset = np.concatenate(stats['z']).reshape(n_datapoints, -1)
+    z = np.concatenate(z_s).reshape(n_datapoints, -1)
     # track target category:
     fill_val = 0
-    col_arr = np.array([]).astype(int)
+    y = np.array([]).astype(int)
     for ci in change_index:
         arr = np.array([fill_val]).repeat(ci)
-        col_arr = np.concatenate([col_arr, arr])
+        y = np.concatenate([y, arr])
         fill_val += 1
+    return z, y
+
+def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2,
+                  metric='euclidean', **kwargs):
+
+    dataset, col_arr = label_zs(stats['z'])
 
     print('computing UMAP projection: ', end='')
-
     print(f'n_neighbors = {n_neighbors}; min_dist = {min_dist}...', end='')
+
     reductor = UMAP(n_neighbors=n_neighbors, min_dist=min_dist,
                         n_components=n_components, 
                                     metric=metric, random_state=42)
     embeddings = reductor.fit_transform(dataset)
-
 
     if n_components == 2:
         fig, ax = plt.subplots(figsize=(12,12))
@@ -179,81 +213,85 @@ def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2, me
     print(' Saved {}'.format(filename.split('/')[-1]))
 
 
-def plot_PCgrid(PC_dic, filename):
-
-    components = PC_dic['components']
-    import ipdb; ipdb.set_trace()
-    components = torch.from_numpy(components.reshape(PC_dic['k'], 1, 28, 28)).float().to('cpu')
-
-    PC_grid = torchvision.utils.make_grid(components, nrow=int(PC_dic['k'] ** 0.5), pad_value=100)
+def plot_PCgrid(PCs, filename, reconstruct=False):
+    components = PCs['components']
+    var_exp = PCs['exp_var']
+    z_s = PCs['z']
+    # y = PCs['y']
+    if reconstruct:
+        reduced_z = components.dot(z_s.T)
+    components = torch.from_numpy(components.reshape(PCs['k'], 1, 28, 28)).float().to('cpu')
+    PC_grid = torchvision.utils.make_grid(components, nrow=int(PCs['k'] ** 0.5), pad_value=100)
     torchvision.utils.save_image(PC_grid, filename)
+    del components, var_exp, z_s
 
 
-def PCA_eig_np(X, k, center=True, scale=False):
+def PCA_eig_np(Z, k, center=True, scale=False):
     '''
     https://medium.com/@ravikalia/pca-done-from-scratch-with-python-2b5eb2790bfc
     '''
-    # import ipdb; ipdb.set_trace()
-    n, p = X.shape
+    n, p = Z.shape
     ones = np.ones([n, 1])
     # subtract from each column its mean, to ensure mean = 0.
     h = ((1/n) * np.matmul(ones, ones.T)) if center else np.zeros([n, n])
     H = np.eye(n) - h
-    X_center = np.matmul(H, X)
-    covariance = 1/(n-1) * np.matmul(X_center.T, X_center)
+    Z_center = np.matmul(H, Z)
+    covariance = 1/(n-1) * np.matmul(Z_center.T, Z_center)
     # divide each column by its std. Only if outcome is independent of variance.
     scaling = np.sqrt(1/np.diag(covariance)) if scale else np.ones(p)
     scaled_covariance = np.matmul(np.diag(scaling), covariance)
     w, v = np.linalg.eig(scaled_covariance)
     components = v[:, :k]
     explained_variance = w[:k]
-    return {'x': X, 'k': k, 'components': components.T,
-                        'exp_var': explained_variance}
+    return {'z': Z, 'k': k, 'components': components.T,
+                'exp_var': explained_variance}
 
 def PCA_test(z_s, k, center=False, mode='self'):
     
-    n_datapoints = 0
-    # [n_datapoints += z.shape[0] for z in z_s]
-    assert n_datapoints == 10000
-    dataset = np.concatenate(z_s['z']).reshape(n_datapoints, -1)
-
+    dataset, y = label_zs(z_s)
+    n_datapoints = dataset.shape[0]
     p = dataset.shape[1] # feature number
-    # print("Components: ", np.allclose(X_reduced.components_, X_reduced_eig['components'],
-    # 	                                                                            rtol=1e-04, atol=1e-04))
-    # print("Exp. Variance: ", np.allclose(X_reduced.explained_variance_, X_reduced_eig['exp_var']))
-    # 	return X_reduced_eig
+
     if mode == 'sklearn':
-        from sklearn.decomposition import PCA
-        X_reduced = PCA(n_components=k).fit(dataset) # dataset.data
-        return {'x': dataset, 'k': k, 'components': X_reduced.components_,
-                                        'exp_var': X_reduced.explained_variance_}
+        PCs = PCA(n_components=k).fit(dataset) # dataset.data
+        return {'z': dataset, 'k': k, 'components': PCs.components_,
+                    'exp_var': PCs.explained_variance_, 'y': y}
     elif mode == 'self':
-        X_reduced = PCA_eig_np(dataset, k, center)
-        return X_reduced
+        PCs = PCA_eig_np(dataset, k, center)
+        PCs['y'] = y
+        return PCs
 
 
-def plot_PCA(components, var_exp, filename):
-    # 1. add ticks
-    components = components[::-1]
-    var_exp = var_exp[::-1]
-
+def plot_reconstructed_PCA(PCs, filename):
+    # sort from highest variance
     # import ipdb; ipdb.set_trace()
-    nrows = ncols = len(var_exp) # can use this to index components and create grid.
-    fig, axs = plt.subplots(nrows, ncols, figsize=(12, 12), sharex='col', sharey='row')
-    # import ipdb; ipdb.set_trace()
+    if isinstance(PCs, dict):
+        components = PCs['components'][::-1]
+        var_exp = PCs['exp_var'][::-1]
+        z_s = PCs['z']
+        y = PCs['y']
+        reduced_z = components.dot(z_s.T) # might want to check this.
+    else: # should be type: sklearn.decomposition.PCA
+        raise NotImplementedError
+        components = PCs.components_[::-1]
+        var_exp = PCs.explained_variance_[::-1]
+        reduced_Z = PCs.transform()
+
+    n_pcs = len(var_exp) # can use this to index components and create grid.
+    fig, axs = plt.subplots(n_pcs, n_pcs, figsize=(12, 12), sharex='col', sharey='row')
     
-    for row in range(nrows):
-        for col in range(ncols):
+    for row in range(n_pcs):
+        for col in range(n_pcs):
             if row > col:
-                axs[row, col].scatter(components[row], components[col], s=.50)# label=f'{col}x{row}')
-                axs[row, col].annotate('var.exp.:\nC{}={:.3f}\nC{}={:.3f}'.format(5 - row, var_exp[row],
-                                                                  5-col, var_exp[col]), xy=(.30, .30), fontsize='xx-small')
-                if row == nrows-1:
-                    axs[row, col].set_xlabel(f'component {5-col}') 
+                axs[row, col].scatter(reduced_z[row], reduced_z[col], c=y, s=.50, alpha=0.6)
+                axs[row, col].annotate('var.exp.:\nC{}={:.3f}\nC{}={:.3f}'.format(n_pcs - row, var_exp[row],
+                                         n_pcs-col, var_exp[col]), xy=(7, 7), fontsize='xx-small')
+                if row == n_pcs-1:
+                    axs[row, col].set_xlabel(f'component {n_pcs-col}') 
+                    axs[row, col].tick_params(axis='x', reset=True, labelsize='x-small')
                 if col == 0:
-                    axs[row, col].set_ylabel(f'component {5-row}')
-                if row == nrows-1 or col == 0:
-                    axs[row, col].tick_params(reset=True, labelsize='x-small')
+                    axs[row, col].set_ylabel(f'component {n_pcs-row}')
+                    axs[row, col].tick_params(axis='y', reset=True, labelsize='x-small')
             else:
                 axs[row, col].remove()
                 axs[row, col] = None
@@ -261,7 +299,66 @@ def plot_PCA(components, var_exp, filename):
     fig.tight_layout()
     fig.subplots_adjust(top=.88)
     plt.savefig(filename, bbox_inches='tight')
+    plt.close()
 
+
+def plot_PCA(PCs, filename):
+    # sort from highest variance
+    if isinstance(PCs, dict):
+        components = PCs['components'][::-1]
+        var_exp = PCs['exp_var'][::-1]
+        z_s = PCs['z']
+        y = PCs['y']
+        reduced_z = components.dot(z_s.T) # might want to check this.
+    else: # should be type: sklearn.decomposition.PCA
+        components = PCs.components_[::-1]
+        var_exp = PCs.explained_variance_[::-1]
+        reduced_Z = PCs.transform()
+
+    n_pcs = len(var_exp) # can use this to index components and create grid.
+    fig, axs = plt.subplots(n_pcs, n_pcs, figsize=(12, 12), sharex='col', sharey='row')
+    
+    for row in range(n_pcs):
+        for col in range(n_pcs):
+            if row > col:
+                axs[row, col].scatter(components[row], components[col], s=.50)# label=f'{col}x{row}')
+                axs[row, col].annotate('var.exp.:\nC{}={:.3f}\nC{}={:.3f}'.format(n_pcs - row, var_exp[row],
+                                         n_pcs-col, var_exp[col]), xy=(.30, .30), fontsize='xx-small')
+                if row == n_pcs-1:
+                    axs[row, col].set_xlabel(f'component {n_pcs-col}') 
+                    axs[row, col].tick_params(axis='x', reset=True, labelsize='x-small', which='both')
+                if col == 0:
+                    axs[row, col].set_ylabel(f'component {n_pcs-row}')
+                    axs[row, col].tick_params(axis='y', reset=True, labelsize='x-small', which='both')
+            else:
+                axs[row, col].remove()
+                axs[row, col] = None
+    
+    fig.tight_layout()
+    fig.subplots_adjust(top=.88)
+    plt.savefig(filename, bbox_inches='tight')
+    plt.close()
+
+#	horrible i know
+#	nrows = ncols = len(var_exp) # can use this to index components and create grid.
+#	fig, axs = plt.subplots(nrows, ncols, figsize=(12, 12), sharex='col', sharey='row')
+#	
+#	for row in range(nrows):
+#		for col in range(ncols):
+#			if row > col:
+#				axs[row, col].scatter(components[row], components[col], s=.50)# label=f'{col}x{row}')
+#				axs[row, col].annotate('var.exp.:\nC{}={:.3f}\nC{}={:.3f}'.format(5 - row, var_exp[row],
+#					                     5-col, var_exp[col]), xy=(.30, .30), fontsize='xx-small')
+#				if row == nrows-1:
+#					axs[row, col].set_xlabel(f'component {5-col}') 
+#				if col == 0:
+#					axs[row, col].set_ylabel(f'component {5-row}')
+#				if row == nrows-1 or col == 0:
+#					axs[row, col].tick_params(reset=True, labelsize='x-small')
+#			else:
+#				axs[row, col].remove()
+#				axs[row, col] = None
+    
 
 def plot_expvar(var_exp, filename):
     
@@ -375,6 +472,7 @@ def craft_z(grand_zs, absolute, kept=None, reps=10, fold=False, device="cuda:0")
     batch_size = grand_zs.shape[0] * reps
     batch = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device='cpu').numpy() # TODO: CHANGE 'CPU'
     arr_mask, _, batch = replace_highest_along_axis(diff, grand_zs, batch.copy(), kept)
+    del diff
     return arr_mask, batch
 
 
@@ -401,15 +499,15 @@ def sample_from_crafted_z(net, all_nz, absolute, kept, reps, device, save_dir, m
     
     images_concat = torchvision.utils.make_grid(x, nrow=int(x.shape[0] ** 0.5))
     torchvision.utils.save_image(images_concat, save_dir + f'/k{kept}_samples.png')
-
     plot_grand_z(mask_zs, save_dir + f'/k{kept}_mask.png')
-    return x, z
+    del x, z, images_concat, mask_zs
+    # return x, z
 
-def plot_grand_z(ndarray, filename):
+def plot_grand_z(ndarray, filename, n_rows_cols=(2, 5)):
     # mpl.rc('text', usetex=True)
     # mpl.rcParams['text.latex.preamble']=[r"\boldmath"]
 
-    n_rows, n_cols = (2, 5)
+    n_rows, n_cols = n_rows_cols
     fig, axs = plt.subplots(n_rows, n_cols, sharex='all', sharey='all', figsize=(10, 7))
 
     n = 0
@@ -425,14 +523,32 @@ def plot_grand_z(ndarray, filename):
     fig.tight_layout()
     plt.savefig(filename, bbox_inches='tight')
     print('\nPlot saved to ' + filename)
+    del ndarray
 
+def y_distance_z(stats, n_categories=10):
+    ''' take stats file, returns a similarity matrix
+        for distances computed item-wise (pixel-wise).'''
+
+    # z, y = label_zs(stats['z'])
+    n_measures = 2
+    out_size = [n_measures] + [stats['z'][0].shape[1], n_categories, n_categories]
+    print(f'computing pixel-wise distances. Output matrix sized: {out_size}')
+    pixelwise_mean = [np.mean(z, axis=0) for z in stats['z']]
+    pixelwise_std = [np.std(z, axis=0) for z in stats['z']]
+
+    y_distance_mean_std = np.zeros(out_size)
+    
+    for k, measure in enumerate([pixelwise_mean, pixelwise_std]):
+        for d_i, m_i in enumerate(measure):
+            for d_j, m_j in enumerate(measure):
+                distance = np.linalg.norm(m_i - m_j)
+                y_distance_mean_std[k, :, d_i, d_j] = distance
+    
+    return y_distance_mean_std
 
 
 def calculate_distance(stats, joint=False, measure=None):
-
-
     distances = np.zeros(shape=(10, 10))
-
     if joint and measure:
         raise ValueError("set either joint or measure argument, not both.")
 
@@ -454,8 +570,6 @@ def calculate_distance(stats, joint=False, measure=None):
                 min_rows = np.min((m.shape[0], n.shape[0]))
                 distance = np.linalg.norm(m[:min_rows] - n[:min_rows])
                 distances[i, j] = distance
-
-
     return distances
 
 def heatmap(square_mtx, filename, plot_title="Magnitude of distance between digits"):
@@ -466,7 +580,17 @@ def heatmap(square_mtx, filename, plot_title="Magnitude of distance between digi
     # configure main plot
     # show img, removing 0's to center color palette distribution. 
     norm_sq_mtx = square_mtx.copy()
-    norm_sq_mtx[ np.array(digits),np.array(digits) ] = None
+
+    if square_mtx.shape[0] == 1: 
+        # for new y_distance_z function
+        # import ipdb; ipdb.set_trace()
+        square_mtx = square_mtx.reshape(square_mtx.shape[1:])
+        norm_sq_mtx = norm_sq_mtx.reshape(norm_sq_mtx.shape[1:])
+
+    # remove diagonal
+    diagonal_sel= np.array(digits)
+    norm_sq_mtx[diagonal_sel, diagonal_sel] = None
+    # subtract lowest value and divide
     norm_sq_mtx -= np.nanmin(norm_sq_mtx)
     norm_sq_mtx /= np.nanmax(norm_sq_mtx)
     im = ax.imshow(norm_sq_mtx, cmap="plasma")
@@ -483,13 +607,14 @@ def heatmap(square_mtx, filename, plot_title="Magnitude of distance between digi
                 val = norm_sq_mtx[i, j]
                 col = 'w' if val < 0.6 else 'b'
                 text = ax.text(j, i, "{:.2f}".format(square_mtx[i, j]),
-                                   ha='center', va='center', color=col)
+                                   ha='center', va='center', color=col, size='x-small')
             else:
                 break
     
     ax.set_title(plot_title)
     fig.tight_layout()
     plt.savefig(filename, bbox_inches='tight')
+    print(f'Plot saved to {filename}')
 
 
 
@@ -501,7 +626,7 @@ def violin_eachdigit(stats, filename, m_epoch):
     digits = [i for i in range(10)]
     stds, means = [stats['std'], stats['mean']]
 
-    # fig = plt.figure()
+    fig = plt.figure()
     ax = fig.add_subplot()
     plt.title('z space stats for model at epoch {}'.format(m_epoch))
     plt.ylabel('Average $z$ values')
@@ -620,8 +745,7 @@ def grand_z(stats, filename=None, epoch_n=244):
 
 
 def track_distribution(net, loader, device, loss_fn, **kwargs):
-
-
+    raise DeprecationWarning("subdued to track_z")
     net.eval()
     loss_meter = util.AverageMeter()
     bpd_meter = util.AverageMeter()
@@ -689,16 +813,14 @@ def track_z(net, loader, device, loss_fn, **kwargs):
                 digits_stds[n] = np.concatenate(( digits_stds[n], dig_std_z.to('cpu').detach().numpy() ))
                 digits_means[n] = np.concatenate(( digits_means[n], dig_mean_z.to('cpu').detach().numpy() ))
                 # concatenate whole z space. 
-                ''' here z_dig.shape == (10, 1, 1, 28, 28) '''
-                # account for that thing!^^^!
                 digits_z[n] = np.concatenate(( digits_z[n], z_dig.to('cpu').detach().numpy() ))
 
             loss = loss_fn(z, sldj)
             loss_meter.update(loss.item(), x.size(0))
             bpd_meter.update(util.bits_per_dim(x, loss_meter.avg), x.size(0))
 
-            progress.set_postfix(loss=loss_meter.avg, 
-                                     bpd=bpd_meter.avg)
+            progress.set_postfix(loss=loss_meter.avg,
+                                         bpd=bpd_meter.avg)
             progress.update(x.size(0))
     # add loss.avg() and bpd.avg() somewhere in the plot. 
     
@@ -768,7 +890,7 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
                 progress_bar.update(x.size(0))
 
     # Save checkpoint
-    save_dir = dir_samples+"/epoch_"+str(epoch)
+    save_dir = dir_samples + f'/epoch_{epoch}'
     os.makedirs(save_dir, exist_ok=True)
 
     if loss_meter.avg < best_loss:
@@ -791,9 +913,10 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
     torchvision.utils.save_image(images_concat, save_dir+'/x.png')
     torchvision.utils.save_image(z_concat, save_dir+'/z.png')
 
-    import pickle
-    with open(save_dir+'/z.pkl', 'wb') as z_serialize:
-        pickle.dump(latent_z, z_serialize)
+    # with open(save_dir+'/z.pkl', 'wb') as z_serialize:
+    # 	pickle.dump(latent_z, z_serialize)
+    torch.save(latent_z, f = save_dir+'/z.pkl')
+
 
     # dict keys as returned by "train"
     train_loss = args['train_loss']
@@ -806,8 +929,71 @@ def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **ar
         print("\nWriting to disk:\n" + report + "At {}".format(dir_samples))
         l.write(report)
 
-def load_network(model_dir, device, args):
+def verify_version(fp, version_string):
+    ''' helper function to define what version of analysis was performed. 
+    Used to select a model without given analysis version #.'''
+    if os.path.isfile(fp):
+        with open(fp, 'r') as f:
+            l = f.readline()
+            while l:
+                if l.startswith(version_string):
+                    # if analysis # `version_string` was completed before:
+                    print("Matched version: " + version_string)
+                    break
+                else:
+                    instead = l.strip()
+                    print(f'Unmatched: {instead} != {version_string} ({fp}).', end='')
+                    print(' Continuing...')
+                l = f.readline()
+    else: 
+        print(f'File {fp} not found.')
+        return False
+    # assuming this returns false if no `version_string` present.
+    return True # XXX
 
+def select_model(model_root, analyse_version, vmarker_fn='/version', 
+                     epoch_range=(120, 258), test=False):
+    ''' Select model according to version specifications.
+    Out: 
+        - fp_vmarker : int --  file containing `version`
+        - fp_model : str -- file to model.pth.tar
+        '''
+    verified_ver = True
+    while verified_ver:
+        if test:
+            assert isinstance(test, int), 'Epoch must be int'
+            model_epoch = test
+        else:
+            model_epoch = randrange(120, 258)
+        fp_model_root = model_root + '/epoch_' + str(model_epoch)
+        fp_vmarker = fp_model_root + vmarker_fn
+        if test:
+            break
+        else:
+            verified_ver = verify_version(fp_vmarker, str(analyse_version))
+    fp_model = fp_model_root + '/model.pth.tar'
+    print('selected model at {}th epoch'.format(model_epoch))
+    return fp_model_root, fp_model, fp_vmarker
+
+def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
+    ''' write first and last parts of `version_str` to `fp_vmarker`
+    Args:
+        version_str
+        fp_vmarker: str -- version marker file path
+        finish: final call, else False
+        sep: define first and last parts of `version_str`.
+    '''
+    vmarker = version_str.split(sep)
+    m = open(fp_vmarker, 'a')
+    if not finish:
+        vmarker[0] += sep
+        m.write('\n'+vmarker[0])
+    else:
+        m.write(vmarker[1]+'\n')
+        # must end with a newline. byebye!
+    m.close()
+
+def load_network(model_dir, device, args):
     net = RealNVP( **filter_args(args.__dict__) )
     # assert os.path.isdir(model_dir), 'Error: no checkpoint directory found.'
     checkpoint = torch.load(model_dir)
@@ -820,7 +1006,6 @@ def load_network(model_dir, device, args):
             net.load_state_dict(checkpoint['net'])
         except RuntimeError:
             raise ArchError('There is a problem importing the mode, check parameters.')
-
     return net
 
 
@@ -844,18 +1029,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
     parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-    parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
-    # parser.add_argument('--dir_model', default="data/res_____/epoch_199", help="Directory for storing generated samples")
-    parser.add_argument('--dataset', '-ds', default="MNIST", type=str, help="MNIST or CIFAR-10")
-    parser.add_argument('--batch_size', default=128, type=int, help='Batch size')
+    parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
+    parser.add_argument('--dataset', '-ds', default='MNIST', type=str, help='MNIST or CIFAR-10')
+    parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
     # parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
+
+    # Analysis
     parser.add_argument('--force', '-f', action='store_true', default=False, help='Re-run z-space anal-yses.')
+    parser.add_argument('--version', '-v', default='V-0.3', type=str, help='Analyses iteration')
 
     # General architecture parameters
     net_type = 'resnet'
     parser.add_argument('--net_type', default='resnet', help='CNN architecture (resnet or densenet)')
     if net_type == 'resnet':
+        parser.add_argument('--root_dir', default='data/res_3-8-32', help='Analyses root directory.')
         parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
         parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
         parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
