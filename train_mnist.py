@@ -10,6 +10,7 @@ import torchvision
 import torchvision.transforms as transforms
 import util
 
+floatAboat = 0.1
 from models import RealNVP, RealNVPLoss
 from tqdm import tqdm
 
@@ -177,7 +178,6 @@ def test(epoch, net, testloader, device, loss_fn, **args):
                 progress_bar.set_postfix(loss=loss_meter.avg,
                                                                  bpd=bpd_meter.avg)
                 progress_bar.update(x.size(0))
-                #debugopt:
                 
     # Save checkpoint
     save_dir = args['dir_samples'] + '/epoch_{:03d}'.format(epoch) #  + str(epoch)
@@ -207,9 +207,9 @@ def test(epoch, net, testloader, device, loss_fn, **args):
     torchvision.utils.save_image(images_concat, save_dir+'/x.png')
     torchvision.utils.save_image(z_concat, save_dir+'/z.png')
 
-    import pickle
-    with open(save_dir+'/z.pkl', 'wb') as z_serialize:
-        pickle.dump(latent_z, z_serialize)
+    # with open(, 'wb') as z_serialize:
+    # 	pickle.dump(latent_z, z_serialize)
+    torch.save(latent_z, f = save_dir+'/z.pkl')
 
     # dict keys as returned by "train"
     train_loss = args['train_loss']
@@ -264,24 +264,30 @@ class Normie(object):
         tensor /= tensor.max()
         return tensor
 
+def find_last_model_relpath(fp):
+    dirs_l = os.listdir(fp)
+    dirs_e = [d for d in dirs_l if d.startswith('epoch_') 
+                                     and d[-3:].isdigit()]
+    dirs_e.sort()
+    last_epoch = dirs_e[-1]
+    print('Last model it.: ' + last_epoch)
+    return fp + '/' + last_epoch
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
     # test_batch_size = 1000 # ?
     parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-    parser.add_argument('--gpu_ids', default='[0, 1]', type=eval, help='IDs of GPUs to use')
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
     ''' resnet dir_sample '''
     ''' densenet dir_sample '''
     # parser.add_argument('--dir_samples', default="data/2dense_3-8-128", help="Directory for storing generated samples")
     # parser.add_argument('--dir_model', default="data/dense_3-16-128/epoch_50", help="Directory for storing generated samples")
     # parser.add_argument('--dir_model', default="data/dense_test4/epoch___", help="Directory for storing generated samples")
-    parser.add_argument('--resume', '-r', action='store_true', default=False, help='Resume from checkpoint')
     # Hyperparameters
     # training
     # parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
-    parser.add_argument('--num_epochs', default=200, type=int, help='Number of epochs to train')
+    parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
     parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
     parser.add_argument('--weight_decay', default=5e-5, type=float,
                                             help='L2 regularization (only applied to the weight norm scale factors)')
@@ -295,17 +301,20 @@ if __name__ == '__main__':
     elif dataset_ == 'CelebA':
         parser.add_argument('--in_channels', default=3, type=int, help='dimensionality along Channels')
 
+# GPU; resume
+    parser.add_argument('--resume', '-r', action='store_true', default=True, help='Resume from checkpoint')
     # General architecture parameters
-    net = 'resnet'
-    dir_ = '0_res_celeba'
-    dir_model_ = 'data/' + dir_ + '/epoch_000'
+    net = 'resnet'  # 1.
+    dir_ = '/0_res_celeba' # 2. 
+    gpus_ = '[0, 1]' # 3. 
+    dir_model_ = find_last_model_relpath('data' + dir_)
+    parser.add_argument('--gpu_ids', default=gpus_, type=eval, help='IDs of GPUs to use')
     parser.add_argument('--net_type', default=net, help='CNN architecture (resnet or densenet)')
     parser.add_argument('--dir_samples', default="data/" + dir_ , help="Directory for storing generated samples")
 
     if net == 'densenet':
         parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
         if dir_.endswith('celeba'): # CelebA 
-            dir_model_ = 'data/' + dir_ + '/epoch_008'
             parser.add_argument('--batch_size', default=4, type=int, help='Batch size')
             parser.add_argument('--mid_channels', default=128, type=int, help='N of feature maps for first resnet layer')
             parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
@@ -318,15 +327,17 @@ if __name__ == '__main__':
             parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
             parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
     elif net == 'resnet':
-        dir_model_ = 'data/' + dir_ + '/epoch_000'
+        # time:
+        # training : 8:07:44 / epoch
+        # testing :  16:55   / epoch
         parser.add_argument('--batch_size', default=8, type=int, help='Batch size')
         parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
         parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-        parser.add_argument('--dir_model', default="data/dense_test6/epoch_209", help="Directory for storing generated samples")
+        parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
         parser.add_argument('--num_samples', default=8, type=int, help='Number of samples at test time')
         parser.add_argument('--num_scales', default=2, type=int, help='Real NVP multi-scale arch. recursions')
 
     
-    best_loss = 6e5
+    best_loss = 5e5
 
     main(parser.parse_args())
