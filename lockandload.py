@@ -745,7 +745,7 @@ def grand_z(stats, filename=None, epoch_n=244):
 
 
 def track_distribution(net, loader, device, loss_fn, **kwargs):
-    raise DeprecationWarning("subdued to track_z")
+    raise DeprecationWarning("replaced by track_z")
     net.eval()
     loss_meter = util.AverageMeter()
     bpd_meter = util.AverageMeter()
