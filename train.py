@@ -295,11 +295,11 @@ if __name__ == '__main__':
 
     # Dataset 
     # # # dataset_ = 'CelebA'
-    dataset_ = 'MNIST' # 1.
+    dataset_ = 'CelebA' # 1.
     # architecture
     net_ = 'resnet'  # 2.
-    dir_ = '/0_' + net_[:3] + dataset_.lower() if dataset.lower() == 'celeba' else '/res_3-8-32' # 3.
-    gpus_ = '[0]' # if net_ == 'densenet' else '[0, 1]'
+    dir_ = '/0_' + net_[:3] +'_'+dataset_.lower() if dataset_.lower() == 'celeba' else '/res_3-8-32' # 3.
+    gpus_ = '[0]' if net_ == 'densenet'  else '[0, 1]'
     dir_model_ = find_last_model_relpath('data' + dir_)
     resume_ = True # 4.
 
@@ -316,6 +316,8 @@ if __name__ == '__main__':
         parser.add_argument('--in_channels', default=3, type=int, help='dimensionality along Channels')
     # architecture
     if net_ == 'densenet':
+        # train one epoch: 6:14
+        # test: 12:12
         parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
         if dir_.endswith('celeba'): # CelebA 
             parser.add_argument('--batch_size', default=4, type=int, help='Batch size')

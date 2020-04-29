@@ -31,29 +31,29 @@ class Conv2dReLU(nn.Module):
 
 
 class DenseLayer(nn.Module):
-    def __init__(self, in_c, growth, Conv2dAct):
+    def __init__(self, in_c, growth, Conv2dAct, bottleneck=False):
         super().__init__()
+        if bottleneck:
+            if in_c > 1:
+                bn = in_c // 2
+            else: bn = in_c
 
-        # if in_c > 1:
-        # 	bn = in_c // 2
-        # else: bn = in_c
+            '''this only make sense if out_c of 1x1 == 4*k'''
+            conv1x1 = Conv2dAct( # change made: in_c -> in_c // 2
+                    in_c, in_c, kernel_size=1, # stride=1, # since it's always 1.
+                    padding=0, bias=False)
 
-        # '''this only make sense if out_c of 1x1 == 4*k'''
-        # conv1x1 = Conv2dAct( # change made: in_c -> in_c // 2
-        # 		in_c, in_c, kernel_size=1, # stride=1, # since it's always 1.
-        # 		padding=0, bias=False)
-
-        # self.nn = torch.nn.Sequential(
-        # 	conv1x1,
-        # 	Conv2dAct( # change made: in_c -> in_c // 2
-        # 		in_c, growth, kernel_size=3, # stride=1,
-        # 		padding=1, bias=True),
-        # 	)
-        # in_c, growth, kernel_size=3, # stride=1,
+            self.nn = torch.nn.Sequential(
+                conv1x1,
+                Conv2dAct( # change made: in_c -> in_c // 2
+                    in_c, growth, kernel_size=3, # stride=1,
+                    padding=1, bias=True)
+                )
+        else:
         '''alternative'''
-        self.nn = Conv2dAct(
-                in_c, growth, kernel_size=3, # stride=1,
-                padding=1, bias=True)
+            self.nn = Conv2dAct(
+                    in_c, growth, kernel_size=3, # stride=1,
+                    padding=1, bias=True)
 
     def forward(self, x):
         h = self.nn(x)
