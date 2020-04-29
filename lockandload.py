@@ -26,7 +26,7 @@ def main(args):
     print("evaluating on: %s" % device)
 
     # select model.
-    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version, test=244)
+    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version) # , test=244)
 
     mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
 
