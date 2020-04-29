@@ -304,15 +304,15 @@ if __name__ == '__main__':
 # GPU; resume
     parser.add_argument('--resume', '-r', action='store_true', default=True, help='Resume from checkpoint')
     # General architecture parameters
-    net = 'resnet'  # 1.
-    dir_ = '/0_res_celeba' # 2. 
-    gpus_ = '[0, 1]' # 3. 
+    net_ = 'resnet'  # 1.
+    dir_ = '/0_' + net_[:3] +'_celeba' # 2. 
+    gpus_ = '[0]' # if net_ == 'densenet' else '[0, 1]'
     dir_model_ = find_last_model_relpath('data' + dir_)
     parser.add_argument('--gpu_ids', default=gpus_, type=eval, help='IDs of GPUs to use')
-    parser.add_argument('--net_type', default=net, help='CNN architecture (resnet or densenet)')
+    parser.add_argument('--net_type', default=net_, help='CNN architecture (resnet or densenet)')
     parser.add_argument('--dir_samples', default="data/" + dir_ , help="Directory for storing generated samples")
 
-    if net == 'densenet':
+    if net_ == 'densenet':
         parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
         if dir_.endswith('celeba'): # CelebA 
             parser.add_argument('--batch_size', default=4, type=int, help='Batch size')
@@ -326,7 +326,7 @@ if __name__ == '__main__':
             parser.add_argument('--num_levels', default=10, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
             parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
             parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
-    elif net == 'resnet':
+    elif net_ == 'resnet':
         # time:
         # training : 8:07:44 / epoch
         # testing :  16:55   / epoch

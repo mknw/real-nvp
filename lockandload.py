@@ -26,7 +26,7 @@ def main(args):
     print("evaluating on: %s" % device)
 
     # select model.
-    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version) #, test=244)
+    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version, test=244)
 
     mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
 
@@ -528,7 +528,8 @@ def plot_grand_z(ndarray, filename, n_rows_cols=(2, 5)):
 def y_distance_z(stats, n_categories=10):
     ''' take stats file, returns a similarity matrix
         for distances computed item-wise (pixel-wise).'''
-
+    
+    import ipdb; ipdb.set_trace()
     # z, y = label_zs(stats['z'])
     n_measures = 2
     out_size = [n_measures] + [stats['z'][0].shape[1], n_categories, n_categories]
