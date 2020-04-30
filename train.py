@@ -46,10 +46,12 @@ def main(args):
         transform_train = transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(176),
+            transforms.Resize(size=args.resize_hw),
             transforms.ToTensor()
         ])
         transform_test = transforms.Compose([
             transforms.CenterCrop(176),
+            transforms.Resize(size=args.resize_hw),
             transforms.ToTensor()
         ])
         target_type = ['attr', 'bbox', 'landmarks']
@@ -275,85 +277,88 @@ def find_last_model_relpath(fp):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
-
-    # test_batch_size = 1000 # ?
+    # system
     parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
-    ''' resnet dir_sample '''
-    ''' densenet dir_sample '''
-    # parser.add_argument('--dir_samples', default="data/2dense_3-8-128", help="Directory for storing generated samples")
-    # parser.add_argument('--dir_model', default="data/dense_3-16-128/epoch_50", help="Directory for storing generated samples")
-    # parser.add_argument('--dir_model', default="data/dense_test4/epoch___", help="Directory for storing generated samples")
-    # Hyperparameters
-    # training
-    # parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
+    # hyperparameters
     parser.add_argument('--num_epochs', default=100, type=int, help='Number of epochs to train')
     parser.add_argument('--lr', default=1e-2, type=float, help='Learning rate') # changed from 1e-3 for MNIST
     parser.add_argument('--weight_decay', default=5e-5, type=float,
                                             help='L2 regularization (only applied to the weight norm scale factors)')
     parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
 
-    # Dataset 
-    # # # dataset_ = 'CelebA'
-    dataset_ = 'CelebA' # 1.
-    # architecture
+    ## logic for default values. (Would likely need to be determined from command line).
+    import ipdb; ipdb.set_trace()
+    dataset_ = 'MNIST' # 1. 'celeba', 'MNIST', 'CIFAR' (not tested)
+    # dataset_ = 'celeba'
     net_ = 'resnet'  # 2.
-    dir_ = '/0_' + net_[:3] +'_'+dataset_.lower() if dataset_.lower() == 'celeba' else '/res_3-8-32' # 3.
-    gpus_ = '[0]' if net_ == 'densenet'  else '[0, 1]'
-    dir_model_ = find_last_model_relpath('data' + dir_)
-    resume_ = True # 4.
+    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
+    gpus_ = '[0, 1]' if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
+    resume_ = True # 5.
+    resize_hw = '(64, 64)'
+
+    if resume_:
+        dir_model_ = find_last_model_relpath('data' + dir_)
+    if resize_hw:
+        parser.add_argument('--resize_hw', default=resize_hw, type=eval)
 
     parser.add_argument('--resume', '-r', action='store_true', default=resume_, help='Resume from checkpoint')
     parser.add_argument('--gpu_ids', default=gpus_, type=eval, help='IDs of GPUs to use')
     parser.add_argument('--net_type', default=net_, help='CNN architecture (resnet or densenet)')
-    parser.add_argument('--dir_samples', default="data/" + dir_ , help="Directory for storing generated samples")
+    parser.add_argument('--dir_samples', default="data" + dir_ , help="Directory for storing generated samples")
 
     # dataset
     parser.add_argument('--dataset', '-ds', default=dataset_, type=str, help="MNIST or CIFAR-10")
     if dataset_ == 'MNIST':
-        parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
+        in_channels_= 1
     elif dataset_ == 'CelebA':
-        parser.add_argument('--in_channels', default=3, type=int, help='dimensionality along Channels')
+        in_channels_= 3
+    
+    parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
+
     # architecture
     if net_ == 'densenet':
         # train one epoch: 6:14
         # test: 12:12
-        parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
-        if dir_.endswith('celeba'): # CelebA 
-            parser.add_argument('--batch_size', default=4, type=int, help='Batch size')
-            parser.add_argument('--mid_channels', default=128, type=int, help='N of feature maps for first resnet layer')
-            parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-            parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
-            parser.add_argument('--num_samples', default=4, type=int, help='Number of samples at test time')
-        elif dir_ == 'dense_test6': # MNIST
-            parser.add_argument('--batch_size', default=512, type=int, help='Batch size')
-            parser.add_argument('--mid_channels', default=120, type=int, help='N of feature maps for first resnet layer')
-            parser.add_argument('--num_levels', default=10, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-            parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
-            parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
+        num_scales_ = 3
+        if dataset_ == 'celeba':
+            batch_size_ = 64
+            mid_channels_ = 128
+            num_levels_ = 8
+            num_samples_ = 4
+        elif dataset_.upper() == 'MNIST': # data/dense_test6
+            if resume_:
+                raise ValueError
+            batch_size_ = 512
+            mid_channels_ = 120
+            num_levels_ = 10
+            num_samples_ = 121
+            num_scales_ = 3
+
     elif net_ == 'resnet':
         if dataset_.lower() == 'celeba': # CelebA 
+            batch_size_ = 8 if len(gpus_) > 3 else 1
+            mid_channels_ = 32
+            num_levels_ = 8
+            num_samples_ = 8
+            num_scales_ = 2
+        elif dataset_.upper() == 'MNIST': # data/dense_test6
+            batch_size_ = 218
+            mid_channels_ = 32
+            num_levels_ = 8
+            num_samples_ = 121
+            num_scales_ = 3
             # time on TitanX-Pascal (batch_size == 8):
             # training : 8:07:44 / epoch
             # testing :  16:55   / epoch
             # time on RTX2080Ti (batch_size == 4):
-            # 
-            # 
-            batch_size_ = 8 if len(gpus_) > 3 else 1
-            print(f'batch_size: {batch_size_}')
-            parser.add_argument('--batch_size', default=8, type=int, help='Batch size')
-            parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
-            parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-            parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
-            parser.add_argument('--num_samples', default=8, type=int, help='Number of samples at test time')
-            parser.add_argument('--num_scales', default=2, type=int, help='Real NVP multi-scale arch. recursions')
-        elif dataset_.upper() == 'MNIST':
-            parser.add_argument('--batch_size', default=215, type=int, help='Batch size')
-            parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
-            parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
-            parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
-            parser.add_argument('--num_samples', default=8, type=int, help='Number of samples at test time')
-            parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
+
+    parser.add_argument('--batch_size', default=batch_size_, type=int, help='Batch size')
+    parser.add_argument('--mid_channels', default=mid_channels_, type=int, help='N of feature maps for first resnet layer')
+    parser.add_argument('--num_levels', default=num_levels_, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+    parser.add_argument('--dir_model', default=dir_model_, help="Directory for storing generated samples")
+    parser.add_argument('--num_samples', default=num_samples_, type=int, help='Number of samples at test time')
+    parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
 
     
     best_loss = 5e5

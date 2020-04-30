@@ -37,7 +37,6 @@ class DenseLayer(nn.Module):
             if in_c > 1:
                 bn = in_c // 2
             else: bn = in_c
-
             '''this only make sense if out_c of 1x1 == 4*k'''
             conv1x1 = Conv2dAct( # change made: in_c -> in_c // 2
                     in_c, in_c, kernel_size=1, # stride=1, # since it's always 1.
@@ -50,7 +49,7 @@ class DenseLayer(nn.Module):
                     padding=1, bias=True)
                 )
         else:
-        '''alternative'''
+            '''alternative'''
             self.nn = Conv2dAct(
                     in_c, growth, kernel_size=3, # stride=1,
                     padding=1, bias=True)
