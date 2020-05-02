@@ -41,17 +41,17 @@ def main(args):
         print('Building model..') 
         # net = RealNVP( **filter_args(args.__dict__) )
 
-    elif args.dataset == 'CelebA':
+    elif args.dataset.lower() == 'celeba':
         # Note: No normalization applied, since RealNVP expects inputs in (0, 1).
         transform_train = transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(176),
-            transforms.Resize(size=args.resize_hw),
+            #transforms.Resize(size=args.resize_hw),
             transforms.ToTensor()
         ])
         transform_test = transforms.Compose([
             transforms.CenterCrop(176),
-            transforms.Resize(size=args.resize_hw),
+            #transforms.Resize(size=args.resize_hw),
             transforms.ToTensor()
         ])
         target_type = ['attr', 'bbox', 'landmarks']
@@ -289,18 +289,20 @@ if __name__ == '__main__':
 
     ## logic for default values. (Would likely need to be determined from command line).
     import ipdb; ipdb.set_trace()
-    dataset_ = 'MNIST' # 1. 'celeba', 'MNIST', 'CIFAR' (not tested)
+    dataset_ = 'celeba' # 1. 'celeba', 'MNIST', 'CIFAR' (not tested)
     # dataset_ = 'celeba'
-    net_ = 'resnet'  # 2.
-    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
-    gpus_ = '[0, 1]' if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
+    net_ = 'densenet'  # 2.
+    dir_ = '/0_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
+    # only multi-gpu if celeba.resnet.
+    gpus_ = '[0, 1]' # if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
     resume_ = True # 5.
-    resize_hw = '(64, 64)'
+
+    # resize_hw = '(64, 64)'
 
     if resume_:
         dir_model_ = find_last_model_relpath('data' + dir_)
-    if resize_hw:
-        parser.add_argument('--resize_hw', default=resize_hw, type=eval)
+    # if 'resize_hw' not in dir():
+    # 	parser.add_argument('--resize_hw', default=resize_hw, type=eval)
 
     parser.add_argument('--resume', '-r', action='store_true', default=resume_, help='Resume from checkpoint')
     parser.add_argument('--gpu_ids', default=gpus_, type=eval, help='IDs of GPUs to use')
@@ -311,7 +313,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', '-ds', default=dataset_, type=str, help="MNIST or CIFAR-10")
     if dataset_ == 'MNIST':
         in_channels_= 1
-    elif dataset_ == 'CelebA':
+    elif dataset_ == 'celeba':
         in_channels_= 3
     
     parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
@@ -325,7 +327,11 @@ if __name__ == '__main__':
             batch_size_ = 64
             mid_channels_ = 128
             num_levels_ = 8
-            num_samples_ = 4
+            num_samples_ = 64
+            if gpus_ == '[0, 1]':
+                batch_size_ = 16
+                num_samples_ = 16
+
         elif dataset_.upper() == 'MNIST': # data/dense_test6
             if resume_:
                 raise ValueError
