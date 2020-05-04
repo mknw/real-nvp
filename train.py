@@ -46,12 +46,13 @@ def main(args):
         transform_train = transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(176),
-            #transforms.Resize(size=args.resize_hw),
+            # TODO: add conditional based on args.resize_hw_
+            transforms.Resize(size=args.resize_hw),
             transforms.ToTensor()
         ])
         transform_test = transforms.Compose([
             transforms.CenterCrop(176),
-            #transforms.Resize(size=args.resize_hw),
+            transforms.Resize(size=args.resize_hw),
             transforms.ToTensor()
         ])
         target_type = ['attr', 'bbox', 'landmarks']
@@ -112,7 +113,7 @@ def main(args):
 
     for epoch in range(start_epoch, start_epoch + args.num_epochs):
         train_stats = train(epoch, net, trainloader, device, optimizer, loss_fn, args.max_grad_norm)
-        test_settings = filter_args(args.__dict__, fields = ['num_samples', 'dir_samples', 'in_channels'])
+        test_settings = filter_args(args.__dict__, fields = ['num_samples', 'dir_samples', 'in_channels', 'resize_hw'])
         test_settings = {**test_settings, **train_stats} # merge dicts.
         test(epoch, net, testloader, device, loss_fn, **test_settings)
 
@@ -146,7 +147,7 @@ def save_imgrid(tensor, name):
     torchvision.utils.save_image(grid, name)
     return
 
-def sample(net, batch_size, in_channels, device):
+def sample(net, num_samples, in_channels, device, resize_hw=None):
     """Sample from RealNVP model.
 
     Args:
@@ -154,11 +155,14 @@ def sample(net, batch_size, in_channels, device):
         batch_size (int): Number of samples to generate.
         device (torch.device): Device to use.
     """
-    side_size = 28 if in_channels == 1 else 176# debatable.. but ok for now.
-    z = torch.randn((batch_size, in_channels, side_size, side_size), dtype=torch.float32, device=device) #changed 3 -> 1
+    
+    if 'resize_hw' not in dir():
+        side_size = 28 if in_channels == 1 else 176 # XXX TOFIX XXX 
+    else:
+        side_size, side_size = resize_hw
+    z = torch.randn((num_samples, in_channels, side_size, side_size), dtype=torch.float32, device=device) #changed 3 -> 1
     x, _ = net(z, reverse=True)
     x = torch.sigmoid(x)
-
     return x, z
 
 
@@ -197,13 +201,12 @@ def test(epoch, net, testloader, device, loss_fn, **args):
         torch.save(state, save_dir + '/model.pth.tar')
         best_loss = loss_meter.avg
 
-    # Save samples and data
-    num_samples = args['num_samples']
-    in_channels = args['in_channels']
     # import ipdb; ipdb.set_trace()
-    images, latent_z = sample(net, num_samples, in_channels, device)
+    sample_fields = ['num_samples', 'in_channels', 'resize_hw']
+    images, latent_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
 
     # plot x and z
+    num_samples = args['num_samples']
     images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
     z_concat = torchvision.utils.make_grid(latent_z, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
     torchvision.utils.save_image(images_concat, save_dir+'/x.png')
@@ -288,21 +291,21 @@ if __name__ == '__main__':
     parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
 
     ## logic for default values. (Would likely need to be determined from command line).
-    import ipdb; ipdb.set_trace()
     dataset_ = 'celeba' # 1. 'celeba', 'MNIST', 'CIFAR' (not tested)
     # dataset_ = 'celeba'
     net_ = 'densenet'  # 2.
-    dir_ = '/0_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
+    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
     # only multi-gpu if celeba.resnet.
-    gpus_ = '[0, 1]' # if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
+    gpus_ = '[0, 1]' if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
     resume_ = True # 5.
 
-    # resize_hw = '(64, 64)'
+    resize_hw_ = '(64, 64)'
 
     if resume_:
         dir_model_ = find_last_model_relpath('data' + dir_)
-    # if 'resize_hw' not in dir():
-    # 	parser.add_argument('--resize_hw', default=resize_hw, type=eval)
+    if 'resize_hw_' in dir():
+        # TODO
+        parser.add_argument('--resize_hw', default=resize_hw_, type=eval)
 
     parser.add_argument('--resume', '-r', action='store_true', default=resume_, help='Resume from checkpoint')
     parser.add_argument('--gpu_ids', default=gpus_, type=eval, help='IDs of GPUs to use')
