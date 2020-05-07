@@ -156,10 +156,11 @@ def sample(net, num_samples, in_channels, device, resize_hw=None):
         device (torch.device): Device to use.
     """
     
-    if 'resize_hw' not in dir():
-        side_size = 28 if in_channels == 1 else 176 # XXX TOFIX XXX 
+    if not resize_hw:
+        side_size = 28
     else:
         side_size, side_size = resize_hw
+    print("sampling with z space sized: {side_size}x{side_size}.")
     z = torch.randn((num_samples, in_channels, side_size, side_size), dtype=torch.float32, device=device) #changed 3 -> 1
     x, _ = net(z, reverse=True)
     x = torch.sigmoid(x)
@@ -291,15 +292,27 @@ if __name__ == '__main__':
     parser.add_argument('--max_grad_norm', type=float, default=100., help='Max gradient norm for clipping')
 
     ## logic for default values. (Would likely need to be determined from command line).
-    dataset_ = 'celeba' # 1. 'celeba', 'MNIST', 'CIFAR' (not tested)
-    # dataset_ = 'celeba'
-    net_ = 'densenet'  # 2.
-    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
-    # only multi-gpu if celeba.resnet.
-    gpus_ = '[0, 1]' if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
-    resume_ = True # 5.
 
-    resize_hw_ = '(64, 64)'
+    # 1. Dataset : 'celeba', 'MNIST', 'CIFAR' (not tested)
+    dataset_ = 'MNIST' 
+    # dataset_ = 'celeba'
+    # 2. Architecture
+    net_ = 'densenet'  # 2.
+    # 3. Samples dir_
+    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
+    dir_ = '/dense_test6'
+    # only multi-gpu if celeba.resnet.
+    # 4. GPUs
+    gpus_ = '[0, 1]' if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
+    # 5. resume training?
+    resume_ = True # 5.
+    # 6. resize 
+
+    if dataset_ == 'MNIST':
+        in_channels_= 1
+    elif dataset_ == 'celeba':
+        in_channels_= 3
+        resize_hw_ = '(64, 64)' # 6.
 
     if resume_:
         dir_model_ = find_last_model_relpath('data' + dir_)
@@ -314,10 +327,6 @@ if __name__ == '__main__':
 
     # dataset
     parser.add_argument('--dataset', '-ds', default=dataset_, type=str, help="MNIST or CIFAR-10")
-    if dataset_ == 'MNIST':
-        in_channels_= 1
-    elif dataset_ == 'celeba':
-        in_channels_= 3
     
     parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
 
@@ -336,8 +345,6 @@ if __name__ == '__main__':
                 num_samples_ = 16
 
         elif dataset_.upper() == 'MNIST': # data/dense_test6
-            if resume_:
-                raise ValueError
             batch_size_ = 512
             mid_channels_ = 120
             num_levels_ = 10
