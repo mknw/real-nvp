@@ -34,6 +34,7 @@ def plot_loss(filename, log_fp='data/res_3-8-32/log', train=False, test=True, hi
     
     if hi_epochs:
         for epoch in hi_epochs:
+            # dirty fix for multiple legends.
             if epoch == hi_epochs[0]:      #'#859900'
                 plt.axvline(x=epoch, ymin=0, c='black', ymax=ylimits[1], label='data analysed', alpha=0.06) # solarized green.
             else:
@@ -51,35 +52,36 @@ def plot_loss(filename, log_fp='data/res_3-8-32/log', train=False, test=True, hi
     plt.savefig(filename)
 
 # MNIST params #
-param_dic = {
-                 'filename': './figs/mnist_resnet_loss.png',
-                 'ylimits': (-10, 1100),
+den_mnist_param_loss_bpd = {
+                 'log_fp' : 'data/dense_test6/log',
+                 'filename': './figs/dmnist_loss_bpd.png',
+                 'ylimits': (-5, 1100),
                  'threshold': 1100,
                          'train': True,
                          'test': True,
                          'loss': True,
                          'bpd': True,
-                         'hi_epochs': [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
+                         'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
                          }
 
 
 # CelebA params #
-densenet_params_loss = { # 'ylimits': (-10, 2000),
+den_celeba_params_loss = {
                                              'log_fp': 'data/1_den_celeba/log',
                                              'filename': './figs/dceleba_loss.png',
                                              'train': True,
                                              'test': True,
-                                             'ylimits': (-10, 40000),
+                                             'ylimits': (0, 40000),
                                              'loss': True,
                                              'bpd': False
                                              }
 
-densenet_params_bpd = {
+den_celeba_params_bpd = {
                                             'log_fp': 'data/1_den_celeba/log',
                                             'filename': './figs/dceleba_bpd.png',
                                             'train': True,
                                             'test': True,
-                                            'ylimits': (-5, 8),
+                                            'ylimits': (0, 8),
                                             'loss': False,
                                             'bpd': True
                                             }
@@ -89,12 +91,9 @@ densenet_params_bpd = {
 if __name__ == '__main__':
     # with everything
 
-    param_dic['filename'] = './figs/dmnist.png'
-    param_dic['log_fp'] = 'data/dense_test6/log'
-    param_dic['hi_epochs'] = 0
-    plot_loss(**param_dic)
-    plot_loss(**densenet_params_loss)
-    plot_loss(**densenet_params_bpd)
+    plot_loss(**den_mnist_param_loss_bpd)
+    plot_loss(**den_celeba_params_loss)
+    plot_loss(**den_celeba_params_bpd)
 
 
 

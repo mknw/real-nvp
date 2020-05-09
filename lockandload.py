@@ -26,7 +26,7 @@ def main(args):
     print("evaluating on: %s" % device)
 
     # select model.
-    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version) # , test=244)
+    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version) # , test=440)
 
     mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
 
@@ -135,12 +135,12 @@ def main(args):
     fn_prefix = fp_model_root + '/umap'
     os.makedirs(fn_prefix+'/3d', exist_ok=True)
 
-    for nn in [7, 10, 15, 20]:
+    for nn in [7, 10, 20]:
         # add option to reduce nn for 3d. 
         dims = [2, 3] if (nn % 10 == 0) else [2]
-        for md in range(0, 10, 2):
+        for md in range(2, 8, 2):
             for d in dims:
-                test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md*0.1, n_components=d)
+                test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md*0.05, n_components=d)
 
     mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
 
@@ -152,7 +152,6 @@ def issue_z_from_pc(PC, stats, filename):
     z_s = grand_z(stats)
     z_s = z_s.reshape(z_s.shape[0], -1)
     components = PC['components']
-    # import ipdb; ipdb.set_trace()
     for i in range(10):
         
         print('h'+i)
@@ -264,7 +263,6 @@ def PCA_test(z_s, k, center=False, mode='self'):
 
 def plot_reconstructed_PCA(PCs, filename):
     # sort from highest variance
-    # import ipdb; ipdb.set_trace()
     if isinstance(PCs, dict):
         components = PCs['components'][::-1]
         var_exp = PCs['exp_var'][::-1]
@@ -515,7 +513,6 @@ def plot_grand_z(ndarray, filename, n_rows_cols=(2, 5)):
         for row in range(n_rows):
             axs[row, col].imshow(ndarray[n])
             ttl = r"Grand-${{z}}$ for {}".format(n)
-            # import ipdb; ipdb.set_trace()
             axs[row, col].title.set_text(ttl)
             n += 1
     
@@ -529,7 +526,6 @@ def y_distance_z(stats, n_categories=10):
     ''' take stats file, returns a similarity matrix
         for distances computed item-wise (pixel-wise).'''
     
-    import ipdb; ipdb.set_trace()
     # z, y = label_zs(stats['z'])
     n_measures = 2
     out_size = [n_measures] + [stats['z'][0].shape[1], n_categories, n_categories]
@@ -934,27 +930,31 @@ def verify_version(fp, version_string):
     ''' helper function to define what version of analysis was performed. 
     Used to select a model without given analysis version #.'''
     if os.path.isfile(fp):
-        with open(fp, 'r') as f:
+        with open(fp, 'r+') as f:
             l = f.readline()
+
             while l:
-                if l.startswith(version_string):
+                print("debugging value for l: " + l)
+
+                if l.strip('\n') == version_string:
                     # if analysis # `version_string` was completed before:
                     print("Matched version: " + version_string)
+                    return True
                     break
                 else:
+                    # TODO: fix eternal loop because f doesn't validate the while loop.
                     instead = l.strip()
                     print(f'Unmatched: {instead} != {version_string} ({fp}).', end='')
                     print(' Continuing...')
                 l = f.readline()
+        return False
     else: 
         print(f'File {fp} not found.')
-        return False
-    # assuming this returns false if no `version_string` present.
-    return True # XXX
+        return False # if file doesn't exist.
 
 def select_model(model_root, analyse_version, vmarker_fn='/version', 
-                     epoch_range=(120, 258), test=False):
-    ''' Select model according to version specifications.
+                     epoch_range=(120, 440), test=False, granularity=10):
+    ''' Select EPOCH according to version specifications. (change function name)
     Out: 
         - fp_vmarker : int --  file containing `version`
         - fp_model : str -- file to model.pth.tar
@@ -965,7 +965,7 @@ def select_model(model_root, analyse_version, vmarker_fn='/version',
             assert isinstance(test, int), 'Epoch must be int'
             model_epoch = test
         else:
-            model_epoch = randrange(120, 258)
+            model_epoch = randrange(epoch_range[0], epoch_range[1], granularity) # TODO only produce n%10==0
         fp_model_root = model_root + '/epoch_' + str(model_epoch)
         fp_vmarker = fp_model_root + vmarker_fn
         if test:
@@ -1006,13 +1006,12 @@ def load_network(model_dir, device, args):
         try:
             net.load_state_dict(checkpoint['net'])
         except RuntimeError:
-            raise ArchError('There is a problem importing the mode, check parameters.')
+            raise ArchError('There is a problem importing the model, check parameters.')
     return net
 
 
 class ArchError(Exception):
-    def __init__(self, expression, message):
-        self.expression = expression
+    def __init__(self, message=None):
         if not message:
             self.message = "State dictionary not matching your architecture. Check your params."
         else:
@@ -1033,22 +1032,54 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
     parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
     parser.add_argument('--dataset', '-ds', default='MNIST', type=str, help='MNIST or CIFAR-10')
-    parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
     # parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
 
     # Analysis
     parser.add_argument('--force', '-f', action='store_true', default=False, help='Re-run z-space anal-yses.')
-    parser.add_argument('--version', '-v', default='V-0.3', type=str, help='Analyses iteration')
+    parser.add_argument('--version', '-v', default='V-0.4', type=str, help='Analyses iteration')
 
     # General architecture parameters
-    net_type = 'resnet'
-    parser.add_argument('--net_type', default='resnet', help='CNN architecture (resnet or densenet)')
-    if net_type == 'resnet':
-        parser.add_argument('--root_dir', default='data/res_3-8-32', help='Analyses root directory.')
-        parser.add_argument('--num_scales', default=3, type=int, help='Real NVP multi-scale arch. recursions')
-        parser.add_argument('--in_channels', default=1, type=int, help='dimensionality along Channels')
-        parser.add_argument('--mid_channels', default=32, type=int, help='N of feature maps for first resnet layer')
-        parser.add_argument('--num_levels', default=8, type=int, help='N of residual blocks in resnet')
+    net_ = 'densenet'
+    dataset_ = 'MNIST'
+    # if dataset_.upper() == 'MNIST':
+    in_channels_ = 1
+    num_samples_ = 121
+    if net_ == 'resnet':
+        root_dir_ = 'data/res_3-8-32'
+        batch_size_ = 256
+
+        num_scales_ = 3
+        mid_channels_ = 32
+        num_levels_ = 8
+
+    if net_ == 'densenet':
+        # train one epoch: 6:14
+        # test: 12:12
+        num_scales_ = 3
+        if dataset_ == 'celeba':
+            batch_size_ = 64
+            mid_channels_ = 128
+            num_levels_ = 8
+            num_samples_ = 64
+            if gpus_ == '[0, 1]':
+                batch_size_ = 16
+                num_samples_ = 16
+
+        elif dataset_.upper() == 'MNIST': # data/dense_test6
+            root_dir_ = 'data/dense_test6'
+            batch_size_ = 218
+            mid_channels_ = 120
+            num_levels_ = 10
+            num_samples_ = 121
+            num_scales_ = 3
+
+    parser.add_argument('--net_type', default=net_, help='CNN architecture (resnet or densenet)')
+    parser.add_argument('--batch_size', default=batch_size_, type=int, help='Batch size')
+    parser.add_argument('--root_dir', default=root_dir_, help='Analyses root directory.')
+    parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
+    parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
+    parser.add_argument('--mid_channels', default=mid_channels_, type=int, help='N of feature maps for first resnet layer')
+    parser.add_argument('--num_levels', default=num_levels_, type=int, help='N of residual blocks in resnet')
 
 
     main(parser.parse_args())

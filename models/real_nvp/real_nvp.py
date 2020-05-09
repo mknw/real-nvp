@@ -7,167 +7,166 @@ from util import squeeze_2x2
 
 
 class RealNVP(nn.Module):
-	"""RealNVP Model
+    """RealNVP Model
 
-	Based on the paper:
-	"Density estimation using Real NVP"
-	by Laurent Dinh, Jascha Sohl-Dickstein, and Samy Bengio
-	(https://arxiv.org/abs/1605.08803).
+    Based on the paper:
+    "Density estimation using Real NVP"
+    by Laurent Dinh, Jascha Sohl-Dickstein, and Samy Bengio
+    (https://arxiv.org/abs/1605.08803).
 
-	Args:
-		num_scales (int): Number of scales in the RealNVP model.
-		in_channels (int): Number of channels in the input.
-		mid_channels (int): Number of channels in the intermediate layers.
-		num_levels (int): Number of residual/dense blocks/layers in the s and t network of
-		`Coupling` layers.
-	"""
-	def __init__(self, **kwargs):
-		# the above defaults will be overridden by `main` in `train[_mnist].py
-		super(RealNVP, self).__init__()
-		# Register data_constraint to pre-process images, not learnable
-		self.register_buffer('data_constraint', torch.tensor([0.9], dtype=torch.float32))
-		
-		print("Deploying " + kwargs['net_type'] + " couplings...")
-		#import ipdb; ipdb.set_trace()
-		self.flows = _RealNVP(0, **kwargs)
+    Args:
+        num_scales (int): Number of scales in the RealNVP model.
+        in_channels (int): Number of channels in the input.
+        mid_channels (int): Number of channels in the intermediate layers.
+        num_levels (int): Number of residual/dense blocks/layers in the s and t network of
+        `Coupling` layers.
+    """
+    def __init__(self, **kwargs):
+        # the above defaults will be overridden by `main` in `train[_mnist].py
+        super(RealNVP, self).__init__()
+        # Register data_constraint to pre-process images, not learnable
+        self.register_buffer('data_constraint', torch.tensor([0.9], dtype=torch.float32))
+        
+        print("Deploying " + kwargs['net_type'] + " couplings...")
+        self.flows = _RealNVP(0, **kwargs)
 
-	def forward(self, x, reverse=False):
-		sldj = None
-		if not reverse:
-			# Expect inputs in [0, 1]
-			if x.min() < 0 or x.max() > 1:
-				raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
-								 .format(x.min(), x.max()))
+    def forward(self, x, reverse=False):
+        sldj = None
+        if not reverse:
+            # Expect inputs in [0, 1]
+            if x.min() < 0 or x.max() > 1:
+                raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
+                                 .format(x.min(), x.max()))
 
-			# De-quantize and convert to logits
-			x, sldj = self._pre_process(x)
+            # De-quantize and convert to logits
+            x, sldj = self._pre_process(x)
 
-		x, sldj = self.flows(x, sldj, reverse)
+        x, sldj = self.flows(x, sldj, reverse)
 
-		return x, sldj
+        return x, sldj
 
-	def _pre_process(self, x):
-		"""Dequantize the input image `x` and convert to logits.
+    def _pre_process(self, x):
+        """Dequantize the input image `x` and convert to logits.
 
-		Args:
-			x (torch.Tensor): Input image.
+        Args:
+            x (torch.Tensor): Input image.
 
-		Returns:
-			y (torch.Tensor): Dequantized logits of `x`.
+        Returns:
+            y (torch.Tensor): Dequantized logits of `x`.
 
-		See Also:
-			- Dequantization: https://arxiv.org/abs/1511.01844, Section 3.1
-			- Modeling logits: https://arxiv.org/abs/1605.08803, Section 4.1
-		"""
-		# import ipdb; ipdb.set_trace()
-		y = (x * 255. + torch.rand_like(x)) / 256.
-		y = (2 * y - 1) * self.data_constraint
-		y = (y + 1) / 2
-		y = y.log() - (1. - y).log()
-
-
-		# Save log-determinant of Jacobian of initial transform
-		ldj = F.softplus(y) + F.softplus(-y) \
-			- F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
-		sldj = ldj.view(ldj.size(0), -1).sum(-1)
+        See Also:
+            - Dequantization: https://arxiv.org/abs/1511.01844, Section 3.1
+            - Modeling logits: https://arxiv.org/abs/1605.08803, Section 4.1
+        """
+        # import ipdb; ipdb.set_trace()
+        y = (x * 255. + torch.rand_like(x)) / 256.
+        y = (2 * y - 1) * self.data_constraint
+        y = (y + 1) / 2
+        y = y.log() - (1. - y).log()
 
 
-		return y, sldj
+        # Save log-determinant of Jacobian of initial transform
+        ldj = F.softplus(y) + F.softplus(-y) \
+            - F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
+        sldj = ldj.view(ldj.size(0), -1).sum(-1)
+
+
+        return y, sldj
 
 
 class _RealNVP(nn.Module):
-	"""Recursive builder for a `RealNVP` model.
+    """Recursive builder for a `RealNVP` model.
 
-	Each/`_RealNVPBuilder` corresponds to a single scale in `RealNVP`,
-	and the constructor is recursively called to build a full `RealNVP` model.
+    Each/`_RealNVPBuilder` corresponds to a single scale in `RealNVP`,
+    and the constructor is recursively called to build a full `RealNVP` model.
 
-	Args:
-		scale_idx (int): Index of current scale.
-		num_scales (int): Number of scales in the RealNVP model.
-		in_channels (int): Number of channels in the input.
-		mid_channels (int): Number of channels in the intermediate layers.
-		num_levels (int): Number of residual/dense blocks/layers in the s and t network of
-			`Coupling` layers.
-	"""
-	def __init__(self, scale_idx, **kwargs): 
-		'''
-		Args:
-		num_scales
-		in_channels
-		mid_channels
-		num_levels
-		net_type
-		'''
+    Args:
+        scale_idx (int): Index of current scale.
+        num_scales (int): Number of scales in the RealNVP model.
+        in_channels (int): Number of channels in the input.
+        mid_channels (int): Number of channels in the intermediate layers.
+        num_levels (int): Number of residual/dense blocks/layers in the s and t network of
+            `Coupling` layers.
+    """
+    def __init__(self, scale_idx, **kwargs): 
+        '''
+        Args:
+        num_scales
+        in_channels
+        mid_channels
+        num_levels
+        net_type
+        '''
 
-		super(_RealNVP, self).__init__()
+        super(_RealNVP, self).__init__()
 
-		self.__dict__.update(kwargs) # assign attribute to architecture recursion module. 
+        self.__dict__.update(kwargs) # assign attribute to architecture recursion module. 
 
-		self.is_last_block = scale_idx == kwargs['num_scales'] - 1
-		print("building scale_n == {}".format(scale_idx))
+        self.is_last_block = scale_idx == kwargs['num_scales'] - 1
+        print("building scale_n == {}".format(scale_idx))
 
-		self.in_couplings = nn.ModuleList([
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
-				            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type),
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
-				            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type),
-			CouplingLayer(self.in_channels, self.mid_channels, self.num_levels, 
-				            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type)
-		])
+        self.in_couplings = nn.ModuleList([
+            CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
+                            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type),
+            CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
+                            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type),
+            CouplingLayer(self.in_channels, self.mid_channels, self.num_levels, 
+                            MaskType.CHECKERBOARD, reverse_mask=False, net_type=self.net_type)
+        ])
 
 
-		if self.is_last_block:
-			self.in_couplings.append(
-				CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
-					            MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type))
-		else:
-			# TODO move computations for in_ and mid_ channels here.
-			self.out_couplings = nn.ModuleList([
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
-					            MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type),
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
-					            MaskType.CHANNEL_WISE, reverse_mask=True, net_type=self.net_type),
-				CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
-					            MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type)
-			])
-			kwargs['in_channels'] *= 2 # increase number of input and output
-			kwargs['mid_channels'] *= 2 # channels for next multi-scale block.
-			self.next_block = _RealNVP(scale_idx + 1, **kwargs)
+        if self.is_last_block:
+            self.in_couplings.append(
+                CouplingLayer(self.in_channels, self.mid_channels, self.num_levels,
+                                MaskType.CHECKERBOARD, reverse_mask=True, net_type=self.net_type))
+        else:
+            # TODO move computations for in_ and mid_ channels here.
+            self.out_couplings = nn.ModuleList([
+                CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
+                                MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type),
+                CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
+                                MaskType.CHANNEL_WISE, reverse_mask=True, net_type=self.net_type),
+                CouplingLayer(4 * self.in_channels, 2 * self.mid_channels, self.num_levels,
+                                MaskType.CHANNEL_WISE, reverse_mask=False, net_type=self.net_type)
+            ])
+            kwargs['in_channels'] *= 2 # increase number of input and output
+            kwargs['mid_channels'] *= 2 # channels for next multi-scale block.
+            self.next_block = _RealNVP(scale_idx + 1, **kwargs)
 
-	def forward(self, x, sldj, reverse=False):
-		if reverse:
-			if not self.is_last_block:
-				# Re-squeeze -> split -> next block
-				x = squeeze_2x2(x, reverse=False, alt_order=True)
-				x, x_split = x.chunk(2, dim=1)
-				x, sldj = self.next_block(x, sldj, reverse)
-				x = torch.cat((x, x_split), dim=1)
-				x = squeeze_2x2(x, reverse=True, alt_order=True)
+    def forward(self, x, sldj, reverse=False):
+        if reverse:
+            if not self.is_last_block:
+                # Re-squeeze -> split -> next block
+                x = squeeze_2x2(x, reverse=False, alt_order=True)
+                x, x_split = x.chunk(2, dim=1)
+                x, sldj = self.next_block(x, sldj, reverse)
+                x = torch.cat((x, x_split), dim=1)
+                x = squeeze_2x2(x, reverse=True, alt_order=True)
 
-				# Squeeze -> 3x coupling (channel-wise)
-				x = squeeze_2x2(x, reverse=False)
-				for coupling in reversed(self.out_couplings):
-					x, sldj = coupling(x, sldj, reverse)
-				x = squeeze_2x2(x, reverse=True)
+                # Squeeze -> 3x coupling (channel-wise)
+                x = squeeze_2x2(x, reverse=False)
+                for coupling in reversed(self.out_couplings):
+                    x, sldj = coupling(x, sldj, reverse)
+                x = squeeze_2x2(x, reverse=True)
 
-			for coupling in reversed(self.in_couplings):
-				x, sldj = coupling(x, sldj, reverse)
-		else:
-			for coupling in self.in_couplings:
-				x, sldj = coupling(x, sldj, reverse)
+            for coupling in reversed(self.in_couplings):
+                x, sldj = coupling(x, sldj, reverse)
+        else:
+            for coupling in self.in_couplings:
+                x, sldj = coupling(x, sldj, reverse)
 
-			if not self.is_last_block:
-				# Squeeze -> 3x coupling (channel-wise)
-				x = squeeze_2x2(x, reverse=False)
-				for coupling in self.out_couplings:
-					x, sldj = coupling(x, sldj, reverse)
-				x = squeeze_2x2(x, reverse=True)
+            if not self.is_last_block:
+                # Squeeze -> 3x coupling (channel-wise)
+                x = squeeze_2x2(x, reverse=False)
+                for coupling in self.out_couplings:
+                    x, sldj = coupling(x, sldj, reverse)
+                x = squeeze_2x2(x, reverse=True)
 
-				# Re-squeeze -> split -> next block
-				x = squeeze_2x2(x, reverse=False, alt_order=True)
-				x, x_split = x.chunk(2, dim=1)
-				x, sldj = self.next_block(x, sldj, reverse)
-				x = torch.cat((x, x_split), dim=1)
-				x = squeeze_2x2(x, reverse=True, alt_order=True)
+                # Re-squeeze -> split -> next block
+                x = squeeze_2x2(x, reverse=False, alt_order=True)
+                x, x_split = x.chunk(2, dim=1)
+                x, sldj = self.next_block(x, sldj, reverse)
+                x = torch.cat((x, x_split), dim=1)
+                x = squeeze_2x2(x, reverse=True, alt_order=True)
 
-		return x, sldj
+        return x, sldj
