@@ -1,4 +1,5 @@
 #!/var/scratch/mao540/miniconda3/envs/maip-venv/bin/python
+# TODO: change venv to: 'sobab/bin/python' ^
 
 import torch 
 import torch.optim as optim
@@ -6,27 +7,30 @@ import torch.backends.cudnn as cudnn
 import torch.utils.data as data
 import torchvision
 import torchvision.transforms as transforms
+import numpy as np
+from models import RealNVP, RealNVPLoss
+from tqdm import tqdm
+from sklearn.decomposition import PCA
+from umap import UMAP
 
 import util
 import argparse
 import os
-import numpy as np
-from models import RealNVP, RealNVPLoss
-from tqdm import tqdm
+import shutil
 from random import randrange
-
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
-from umap import UMAP
 
 
-def main(args):
+def main(args, model_meta_stuff = None):
     device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
     print("evaluating on: %s" % device)
 
     # select model.
-    fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version) # , test=440)
+    if not model_meta_stuff:
+        fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version, test=i)
+    else:
+        fp_model_root, fp_model, fp_vmarker = model_meta_stuff
 
     mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
 
@@ -39,7 +43,7 @@ def main(args):
         print('Found cached file, skipping computations of mean and std.')
         stats = torch.load(stats_filename)
     else:
-        if args.dataset == 'MNIST':
+        if args.dataset == 'mnist':
             transform_train = transforms.Compose([
                 transforms.ToTensor()
                 # transforms.ColorJitter(brightness=0.3)
@@ -678,7 +682,7 @@ def scatter_eachdigit(stats, filename, m_epoch):
             axs[row, col].scatter(ctrd_x, ctrd_y, c=color_variant(colors[dig]))
             axs[row,col].set_xlabel('mean')
             axs[row,col].set_ylabel('std')
-            axs[row,col].annotate('$\mu$: {:.2f}\n$\sigma^2$: {:.2f}'.format(ctrd_x, ctrd_y), (ctrd_x, ctrd_y))
+            axs[row,col].annotate('$\mu$: {:.2f}\n$\sigma$: {:.2f}'.format(ctrd_x, ctrd_y), (ctrd_x, ctrd_y))
 
             dig += 1
 
@@ -866,43 +870,6 @@ def sample(net, batch_size, device):
     return x, z
 
 
-def test(epoch, net, testloader, device, loss_fn, num_samples, dir_samples, **args):
-    global best_loss
-    net.eval()
-    loss_meter = util.AverageMeter()
-    bpd_meter = util.AverageMeter()
-    with torch.no_grad():
-        with tqdm(total=len(testloader.dataset)) as progress_bar:
-            for x, _ in testloader:
-                x = x.to(device)
-                z, sldj = net(x, reverse=False)
-                ## HERE: TODO: do something with z and y
-                loss = loss_fn(z, sldj)
-                loss_meter.update(loss.item(), x.size(0))
-                # bits per dimensions
-                bpd_meter.update(util.bits_per_dim(x, loss_meter.avg), x.size(0))
-
-                progress_bar.set_postfix(loss=loss_meter.avg,
-                                                                 bpd=bpd_meter.avg)
-                progress_bar.update(x.size(0))
-
-    # Save checkpoint
-    save_dir = dir_samples + f'/epoch_{epoch}'
-    os.makedirs(save_dir, exist_ok=True)
-
-    if loss_meter.avg < best_loss:
-    # if epoch > 40:
-        print('Saving...')
-        state = {
-            'net': net.state_dict(),
-            'test_loss': loss_meter.avg,
-            'epoch': epoch,
-        }
-        torch.save(state, save_dir + '/model.pth.tar')
-        best_loss = loss_meter.avg
-
-    # Save samples and data
-    images, latent_z = sample(net, num_samples, device)
 
     # plot x and z
     images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
@@ -953,7 +920,7 @@ def verify_version(fp, version_string):
         return False # if file doesn't exist.
 
 def select_model(model_root, analyse_version, vmarker_fn='/version', 
-                     epoch_range=(120, 440), test=False, granularity=10):
+                     epoch_range=(430, 690), test=False, granularity=10):
     ''' Select EPOCH according to version specifications. (change function name)
     Out: 
         - fp_vmarker : int --  file containing `version`
@@ -994,6 +961,23 @@ def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
         # must end with a newline. byebye!
     m.close()
 
+def cleanup_version_f(fp_vmarker):
+
+    tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '')
+
+    with open(fp_vmarker, 'r') as v:
+        with open(tmp_fp_vmarker, 'w') as t:
+            for l in v:
+                stripped = l.strip()
+                if stripped == 'V-' or stripped == '':
+                    continue
+                else:
+                    t.write(l)
+    shutil.move(tmp_fp_vmarker, fp_vmarker)
+    
+
+
+
 def load_network(model_dir, device, args):
     net = RealNVP( **filter_args(args.__dict__) )
     # assert os.path.isdir(model_dir), 'Error: no checkpoint directory found.'
@@ -1031,19 +1015,24 @@ if __name__ == '__main__':
     parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
     parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
-    parser.add_argument('--dataset', '-ds', default='MNIST', type=str, help='MNIST or CIFAR-10')
+    parser.add_argument('--dataset', '-ds', default='mnist', type=str, help='MNIST or CIFAR-10')
     # parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
 
+    version_ = 'V-0.4'
     # Analysis
     parser.add_argument('--force', '-f', action='store_true', default=False, help='Re-run z-space anal-yses.')
-    parser.add_argument('--version', '-v', default='V-0.4', type=str, help='Analyses iteration')
+    parser.add_argument('--version', '-v', default=version_, type=str, help='Analyses iteration')
 
     # General architecture parameters
     net_ = 'densenet'
-    dataset_ = 'MNIST'
-    # if dataset_.upper() == 'MNIST':
-    in_channels_ = 1
-    num_samples_ = 121
+    dataset_ = 'mnist'
+    if dataset_ == 'mnist':
+        in_channels_ = 1
+        num_samples_ = 121
+    elif dataset_ == 'celeba':
+        in_channels_ = 3
+        # num_samples_ = 64
+
     if net_ == 'resnet':
         root_dir_ = 'data/res_3-8-32'
         batch_size_ = 256
@@ -1065,7 +1054,7 @@ if __name__ == '__main__':
                 batch_size_ = 16
                 num_samples_ = 16
 
-        elif dataset_.upper() == 'MNIST': # data/dense_test6
+        elif dataset_ == 'mnist': # data/dense_test6
             root_dir_ = 'data/dense_test6'
             batch_size_ = 218
             mid_channels_ = 120
@@ -1082,7 +1071,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_levels', default=num_levels_, type=int, help='N of residual blocks in resnet')
 
 
-    main(parser.parse_args())
-    # backends = ['GTK3Agg', 'GTK3Cairo', 'MacOSX', 'nbAgg', 'Qt4Agg', 'Qt4Cairo', 'Qt5Agg',
-    # 		'Qt5Cairo', 'TkAgg', 'TkCairo', 'WebAgg', 'WX', 'WXAgg', 'WXCairo', 'agg', 'cairo', 'pdf',
-    # 		'pgf', 'ps', 'svg', 'template']
+    for i in range(580, 690, 10):
+        print("Testing epoch {}...".format(i), end='')
+        model_meta_stuff = select_model(root_dir_, version_, test=i)
+        main(parser.parse_args(), model_meta_stuff)
+        print(" done.")
+    # main(parser.parse_args())
+

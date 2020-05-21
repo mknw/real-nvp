@@ -9,7 +9,7 @@ def plot_loss(filename, log_fp='data/res_3-8-32/log', train=False, test=True, hi
                   ylimits=None, threshold=None, loss=True, bpd=True):
 
     df = pandas.read_csv(log_fp, names=['epoch', 'train_loss', 'train_bpd', 'test_loss', 'test_bpd'])
-    plot_title = ''
+    # plot_title = ''
 
     if threshold:
         df[df>threshold] = None
@@ -43,7 +43,7 @@ def plot_loss(filename, log_fp='data/res_3-8-32/log', train=False, test=True, hi
     
 
     stats_legend = plt.legend()
-    # ax = plt.gca().add_artist(stats_legend)
+    ax = plt.gca().add_artist(stats_legend)
     print(stats_legend)
     
     # analysed_epochs_patch = mpatches.Patch(color='#859900', label='analysed epochs')
@@ -71,7 +71,7 @@ den_celeba_params_loss = {
                                              'filename': './figs/dceleba_loss.png',
                                              'train': True,
                                              'test': True,
-                                             'ylimits': (0, 40000),
+                                             'ylimits': (20000, 27500),
                                              'loss': True,
                                              'bpd': False
                                              }
@@ -81,7 +81,7 @@ den_celeba_params_bpd = {
                                             'filename': './figs/dceleba_bpd.png',
                                             'train': True,
                                             'test': True,
-                                            'ylimits': (0, 8),
+                                            'ylimits': (2.5, 3.3),
                                             'loss': False,
                                             'bpd': True
                                             }

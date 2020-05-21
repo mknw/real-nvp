@@ -21,7 +21,7 @@ def main(args):
     print("training on: %s" % device)
     start_epoch = 0
 
-    if args.dataset == 'MNIST':
+    if args.dataset == 'mnist':
         transform_train = transforms.Compose([
             transforms.ToTensor(),
             # GaussianNoise(std=0.17) # yeah!
@@ -294,21 +294,21 @@ if __name__ == '__main__':
     ## logic for default values. (Would likely need to be determined from command line).
 
     # 1. Dataset : 'celeba', 'MNIST', 'CIFAR' (not tested)
-    dataset_ = 'MNIST' 
-    # dataset_ = 'celeba'
+    # dataset_ = 'mnist' 
+    dataset_ = 'celeba'
     # 2. Architecture
     net_ = 'densenet'  # 2.
     # 3. Samples dir_
-    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/res_3-8-32' # 3.
-    dir_ = '/dense_test6'
+    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/dense_test6' # 3.
+    # dir_ = '/dense_test6'
     # only multi-gpu if celeba.resnet.
     # 4. GPUs
-    gpus_ = '[0, 1]' if net_ == 'resnet' and dataset_=='celeba'  else '[0]' # 4.
+    gpus_ = '[0, 1]' if net_ == 'densenet' and dataset_=='mnist'  else '[0]' # 4.
     # 5. resume training?
     resume_ = True # 5.
     # 6. resize 
 
-    if dataset_ == 'MNIST':
+    if dataset_ == 'mnist':
         in_channels_= 1
     elif dataset_ == 'celeba':
         in_channels_= 3
@@ -326,7 +326,7 @@ if __name__ == '__main__':
     parser.add_argument('--dir_samples', default="data" + dir_ , help="Directory for storing generated samples")
 
     # dataset
-    parser.add_argument('--dataset', '-ds', default=dataset_, type=str, help="MNIST or CIFAR-10")
+    parser.add_argument('--dataset', '-ds', default=dataset_.lower(), type=str, help="MNIST or CIFAR-10")
     
     parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
 
@@ -344,21 +344,21 @@ if __name__ == '__main__':
                 batch_size_ = 16
                 num_samples_ = 16
 
-        elif dataset_.upper() == 'MNIST': # data/dense_test6
-            batch_size_ = 512
+        elif dataset_ == 'mnist': # data/dense_test6
+            batch_size_ = 1024 if len(gpus_) > 3 else 512
             mid_channels_ = 120
             num_levels_ = 10
             num_samples_ = 121
             num_scales_ = 3
 
     elif net_ == 'resnet':
-        if dataset_.lower() == 'celeba': # CelebA 
+        if dataset_ == 'celeba': # CelebA 
             batch_size_ = 8 if len(gpus_) > 3 else 1
             mid_channels_ = 32
             num_levels_ = 8
             num_samples_ = 8
             num_scales_ = 2
-        elif dataset_.upper() == 'MNIST': # data/dense_test6
+        elif dataset_ == 'mnist': # data/dense_test6
             batch_size_ = 218
             mid_channels_ = 32
             num_levels_ = 8
