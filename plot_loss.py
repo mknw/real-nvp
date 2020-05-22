@@ -52,18 +52,53 @@ def plot_loss(filename, log_fp='data/res_3-8-32/log', train=False, test=True, hi
     plt.savefig(filename)
 
 # MNIST params #
-den_mnist_param_loss_bpd = {
+den_mnist_param_loss= {
                  'log_fp' : 'data/dense_test6/log',
-                 'filename': './figs/dmnist_loss_bpd.png',
-                 'ylimits': (-5, 1100),
-                 'threshold': 1100,
+                 'filename': './figs/dmnist_loss.png',
+                 'ylimits': (400, 1100),
+                 # 'threshold': 1100,
                          'train': True,
                          'test': True,
                          'loss': True,
+                         'bpd': False,
+                         'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
+                         }
+
+den_mnist_param_bpd = {
+                 'log_fp' : 'data/dense_test6/log',
+                 'filename': './figs/dmnist_bpd.png',
+                 'ylimits': (0, 3.5),
+                 # 'threshold': 1100,
+                         'train': True,
+                         'test': True,
+                         'loss': False,
                          'bpd': True,
                          'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
                          }
 
+res_mnist_param_loss = {
+                 'log_fp' : 'data/res_3-8-32/log',
+                 'filename': './figs/rmnist_loss.png',
+                 'ylimits': (400, 1100),
+                 # 'threshold': 1100,
+                         'train': True,
+                         'test': True,
+                         'loss': True,
+                         'bpd': False,
+                         'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
+                         }
+
+res_mnist_param_bpd = {
+                 'log_fp' : 'data/res_3-8-32/log',
+                 'filename': './figs/rmnist_bpd.png',
+                 'ylimits': (0, 3.5),
+                 # 'threshold': 1100,
+                         'train': True,
+                         'test': True,
+                         'loss': False,
+                         'bpd': True,
+                         'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
+                         }
 
 # CelebA params #
 den_celeba_params_loss = {
@@ -91,7 +126,10 @@ den_celeba_params_bpd = {
 if __name__ == '__main__':
     # with everything
 
-    plot_loss(**den_mnist_param_loss_bpd)
+    plot_loss(**den_mnist_param_loss)
+    plot_loss(**den_mnist_param_bpd)
+    plot_loss(**res_mnist_param_loss)
+    plot_loss(**res_mnist_param_bpd)
     plot_loss(**den_celeba_params_loss)
     plot_loss(**den_celeba_params_bpd)
 

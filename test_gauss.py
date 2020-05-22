@@ -178,7 +178,7 @@ def distribution_momenta(z, quantiles=[0.1,0.25, 0.5, 0.75,0.9], mean=False, idx
 
 
 
-def ndim_kstest(z, axis=1, cdf='norm'):
+def ndim_kstest(z, axis=1, cdf='norm', args=()):
     z = np.apply_along_axis(distatis.kstest, axis, z, cdf)
     return (z[:,0], z[:,1])
 
@@ -296,7 +296,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', '-ds', default='mnist', type=str, help='MNIST or CIFAR-10')
     # parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
     # XXX PARAMS XXX
-    version_ = 'V-G.4'
+    version_ = 'V-G.5'
     force_ = False
     # Analysis
     parser.add_argument('--force', '-f', action='store_true', default=force_, help='Re-run z-space anal-yses.')
@@ -354,9 +354,9 @@ if __name__ == '__main__':
     parser.add_argument('--pgaussfile', default=pgaussfile_, type=str, help='log gaussianity to file')
     
 
-    # for i in range(120, 690, 10):
-    # 	model_meta_stuff = select_model(root_dir_, version_, test=i)
-    # 	main(parser.parse_args(), model_meta_stuff)
-    # 	print(" done.")
+    for i in range(120, 690, 10):
+        model_meta_stuff = select_model(root_dir_, version_, test=i)
+        main(parser.parse_args(), model_meta_stuff)
+        print(" done.")
     plot_pvals('figs/dmnist_gauss.png', pgaussfile_)
 
