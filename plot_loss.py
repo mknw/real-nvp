@@ -55,7 +55,8 @@ def plot_loss(filename, log_fp='data/res_3-8-32/log', train=False, test=True, hi
 den_mnist_param_loss= {
                  'log_fp' : 'data/dense_test6/log',
                  'filename': './figs/dmnist_loss.png',
-                 'ylimits': (400, 1100),
+                 # 'ylimits': (400, 1100),
+                 'ylimits': (600, 700),
                  # 'threshold': 1100,
                          'train': True,
                          'test': True,
@@ -79,7 +80,8 @@ den_mnist_param_bpd = {
 res_mnist_param_loss = {
                  'log_fp' : 'data/res_3-8-32/log',
                  'filename': './figs/rmnist_loss.png',
-                 'ylimits': (400, 1100),
+                 # 'ylimits': (400, 1100),
+                 'ylimits': (600, 700),
                  # 'threshold': 1100,
                          'train': True,
                          'test': True,
