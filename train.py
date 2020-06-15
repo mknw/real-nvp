@@ -63,8 +63,6 @@ def main(args):
         testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
         print('Building model..')
-        # net = RealNVP( **filter_args(args.__dict__) )
-        pass
 
     elif args.dataset == 'CIFAR-10':
         # Note: No normalization applied, since RealNVP expects inputs in (0, 1).
