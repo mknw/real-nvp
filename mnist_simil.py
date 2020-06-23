@@ -108,7 +108,7 @@ def main(args, model_meta_stuff = None):
     fp_distr = fp_model_root + '/distr' # distributions
     fp_simil = fp_model_root + '/similarity' # similarity
     fp_replace = fp_model_root+'/replace_from_grandz'
-    fp_pca = fp_model_root + '/pca/new'
+    fp_pca = fp_model_root + '/pca'
     paths = [fp_distr, fp_simil, fp_replace, fp_pca]
     maketree = lambda l: [os.makedirs(p) for p in l if not os.path.isdir(p)]
     maketree(paths)
@@ -117,7 +117,7 @@ def main(args, model_meta_stuff = None):
     
     ''' distributions analyses '''
     # print("analysing z distribution... ")
-    # scatter_alldigits(stats, fp_distr + '/meanstds.png', epoch)
+    scatter_alldigits(stats, fp_distr + '/meanstds.png', epoch)
     # scatter_eachdigit(stats, fp_distr + '/dig_subplots.png', epoch)
     # violin_eachdigit(stats, fp_distr + '/dig_violins.png', epoch)
     # ''' distance analysis '''
@@ -149,37 +149,17 @@ def main(args, model_meta_stuff = None):
     
 
     ''' dimensionality reduction '''
-    # PCA
-    # for method in ['sklearn']: # 'self']:
-    # PCs = PCA_test(stats['z'], k='mle', center=True, mode='sklearn')
     pick_components = 'mle'
     dataset, _ = label_zs(stats['z'])
+
     pca = PCA(n_components=pick_components).fit(dataset) # dataset.data
-    # 	return {'z': dataset, 'k': n_pcs, 'components': PCs.components_,
-    # 			'var_exp': PCs.explained_variance_, 'y': y, 
-    # 			'ratio_var_exp': PCs.explained_variance_ratio_,
-    # 			'rX': PCs.transform(dataset),
-    # 			'mean': PCs.mean_}
-    print("components componed... ", end='')
-
-    fn = fp_pca + '/PC_grid.png'
-    plot_PCgrid(pca, pk=36, filename=fn)
-    print("grid made. Plotting reconstructed Z-spaces...", end='')
-    fn = fp_pca + '/PC_rZ.png'
-    plot_rX(pca, stats['z'], filename=fn, n_digits=10)
-
-    # fn = fp_pca + '/sheer_PCs.png'
-    # plot_PCA(pca, stats['z'], k=20, filename=fn)
-    print("plotting variance explained... ", end='')
-    fn = fp_pca + '/pcaVE.png'
-    plot_expvar(pca.explained_variance_, pca.explained_variance_ratio_, fn)
-    print("plotting reduced z... ", end='')
-    fn = fp_pca + '/reduced_z.png'
-    plot_reduced_dataset(pca, stats['z'], k=20, filename=fn)
-
+    fp_pca += '/new'
+    maketree([fp_pca])
+    analyse_principal_components(pca,stats,fp_pca,36)
     import ipdb; ipdb.set_trace()
+
     # UMAP -- `test_umap` will use directories `<fp_model_root>/umap/{,3d}`
-    fn_prefix = fp_model_root + '/umap'
+    fn_prefix = fp_model_root + '/umap'+ '/new'
     os.makedirs(fn_prefix+'/3d', exist_ok=True)
 
     for nn in [7, 10, 20]:
@@ -259,6 +239,31 @@ def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2,
     print(' Saved {}'.format(filename.split('/')[-1]))
 
 
+def analyse_principal_components(pca, stats, fp_pca,pk, n_rX_dig=10):
+    '''
+    Arguments: 
+        - pca: sklearn.decomposition. PCA object. after calling .fit()
+        - stats: Z stats
+        - fp_pca: root filepath for plot saving.
+        - pk: componets to show in plots.
+    '''
+    print(f'first {pk} PC\'s plotted. ', end='')
+    fn = fp_pca + '/PC_grid.png'
+    plot_PCgrid(pca, pk=36, filename=fn)
+    print(f"Plotting reconstructed Z-spaces... ", end='')
+    fn = fp_pca + '/PC_rZ.png'
+    plot_rZ(pca, stats['z'], filename=fn, n_digits=n_rX_dig)
+    # fn = fp_pca + '/sheer_PCs.png'
+    # plot_PCA(pca, stats['z'], k=20, filename=fn)
+    print("plotting variance explained... ", end='')
+    fn = fp_pca + '/pcaVE.png'
+    plot_expvar(pca.explained_variance_, pca.explained_variance_ratio_, fn)
+    print("plotting reduced z's... ", end='')
+    fn = fp_pca + '/reduced_z.png'
+    plot_reduced_dataset(pca, stats['z'], k=20, filename=fn)
+    print("done")
+
+
 def plot_PCgrid(PCA, filename, pk=None, reconstruct=False):
     if not pk: # Plot Komponents
         pk = PCA.n_components_
@@ -282,11 +287,11 @@ def plot_PCgrid(PCA, filename, pk=None, reconstruct=False):
     plt.savefig(filename)
     del components, var_exp
 
-def plot_rX(pca, z_s, filename, n_digits):
+def plot_rZ(pca, z_s, filename, n_digits):
 
     components = pca.components_
     var_exp = pca.explained_variance_
-    z_s, y = label_zs(z_s) #XXX FIX THE FOX XXX
+    z_s, y = label_zs(z_s) # XXX FIX THE FOX XXX
 
     # red_z = pca.transform(z_s)
     # rec_Z = pca.inverse_transform(red_z)
@@ -368,25 +373,24 @@ def plot_reduced_dataset(pca, z_s, k, filename):
         # import ipdb; ipdb.set_trace()
         z_s, y = label_zs(z_s)
         red_z = pca.transform(z_s)
-        reduced_z = red_z[:k][::-1] # PCs['X'].T becomes (306,10000)
+        reduced_z = red_z[:, :k][:,::-1]# PCs['X'].T becomes (306,10000)
     else: # should be type: sklearn.decomposition.PCA
         raise NotImplementedError
-        components = PCs.components_[::-1]
-        var_exp = PCs.explained_variance_[::-1]
-        reduced_Z = PCs.transform()
 
     n_pcs = len(var_exp) # can use this to index components and create grid.
-    fs = n_pcs * 2
+    fs = int(n_pcs * 1.3)
     fig, axs = plt.subplots(n_pcs, n_pcs, figsize=(fs, fs), sharex='col', sharey='row')
-    cmap = plt.cm.tab10
+    cmap = plt.cm.rainbow
     
     for row in range(n_pcs):
-        indices = np.random.permutation(reduced_z.shape[1])
-        reduced_z = np.take(reduced_z, indices, axis=1)
+        # randomly permutation of reduced datapoints for 
+        # visualization that is evened among categories. 
+        indices = np.random.permutation(reduced_z.shape[0])
+        reduced_z = np.take(reduced_z, indices, axis=0)
         y = np.take(y, indices)
         for col in range(n_pcs):
             if row > col:
-                axs[row, col].scatter(reduced_z[row], reduced_z[col], c=y, cmap=cmap, s=.50, alpha=0.6)
+                axs[row, col].scatter(reduced_z[:,row], reduced_z[:,col], c=y, cmap=cmap, s=.50, alpha=0.6)
                 axs[row, col].annotate('% VE:\nC{}={:.2f}\nC{}={:.2f}'.format(n_pcs - row, ratio_var_exp[row]*100,
                                          n_pcs-col, ratio_var_exp[col]*100), xy=(7, 7), fontsize='xx-small')
                 if row == n_pcs-1:
@@ -438,25 +442,7 @@ def plot_PCA(pca, z_s, k, filename):
     plt.savefig(filename, bbox_inches='tight')
     plt.close()
 
-#	horrible i know
-#	nrows = ncols = len(var_exp) # can use this to index components and create grid.
-#	fig, axs = plt.subplots(nrows, ncols, figsize=(12, 12), sharex='col', sharey='row')
-#	
-#	for row in range(nrows):
-#		for col in range(ncols):
-#			if row > col:
-#				axs[row, col].scatter(components[row], components[col], s=.50)# label=f'{col}x{row}')
-#				axs[row, col].annotate('var.exp.:\nC{}={:.3f}\nC{}={:.3f}'.format(5 - row, var_exp[row],
-#					                     5-col, var_exp[col]), xy=(.30, .30), fontsize='xx-small')
-#				if row == nrows-1:
-#					axs[row, col].set_xlabel(f'component {5-col}') 
-#				if col == 0:
-#					axs[row, col].set_ylabel(f'component {5-row}')
-#				if row == nrows-1 or col == 0:
-#					axs[row, col].tick_params(reset=True, labelsize='x-small')
-#			else:
-#				axs[row, col].remove()
-#				axs[row, col] = None
+
     
 
 def plot_expvar(var_exp, r_var_exp, filename):
@@ -1061,8 +1047,9 @@ def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
 
 def cleanup_version_f(fp_vmarker):
 
-    tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '')
+    tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '%')
 
+    print("filtering analyses versions: ")
     with open(fp_vmarker, 'r') as v:
         with open(tmp_fp_vmarker, 'w') as t:
             for l in v:
@@ -1071,6 +1058,7 @@ def cleanup_version_f(fp_vmarker):
                     continue
                 else:
                     t.write(l)
+                    print("keeping: {}".format(l))
     shutil.move(tmp_fp_vmarker, fp_vmarker)
     
 
