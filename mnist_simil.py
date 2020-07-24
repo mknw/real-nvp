@@ -117,7 +117,7 @@ def main(args, model_meta_stuff = None):
     
     ''' distributions analyses '''
     # print("analysing z distribution... ")
-    scatter_alldigits(stats, fp_distr + '/meanstds.png', epoch)
+    # scatter_alldigits(stats, fp_distr + '/meanstds.png', epoch)
     # scatter_eachdigit(stats, fp_distr + '/dig_subplots.png', epoch)
     # violin_eachdigit(stats, fp_distr + '/dig_violins.png', epoch)
     # ''' distance analysis '''
@@ -138,38 +138,48 @@ def main(args, model_meta_stuff = None):
     # 	measure = 'std'
 
     # all_nz = grand_z(stats)
-    # if 'net' not in dir():
+    # if 'net' not in dir(): # XXX
     # 	net = load_network( fp_model, device, args)
     # # z=craft_z(all_nz,kept=3) #helper function, included in sample_from_crafted_z.
     # for k in [5, 10, 25, 50, 100, 200]:
     # 	sample_from_crafted_z(net, all_nz, absolute=True, kept=k, device=device, reps=10,
     # 								 save_dir=fp_replace) #monster_mode=True)
     # # overall Z for each digit (averaged across batches).
-    # plot_grand_z(all_nz, fp_model_root + '/grand_zs.png')
+    # plot_grand_z(all_nz, fp_model_root + '/grand_zs_RdBu_norm.png', norm=False)
     
 
     ''' dimensionality reduction '''
-    pick_components = 'mle'
-    dataset, _ = label_zs(stats['z'])
+    # pick_components = 'mle'
+    # dataset, _ = label_zs(stats['z'])
 
-    pca = PCA(n_components=pick_components).fit(dataset) # dataset.data
-    fp_pca += '/new'
-    maketree([fp_pca])
-    analyse_principal_components(pca,stats,fp_pca,36)
+    if 'net' not in dir():
+        net = load_network( fp_model, device, args)
+
+    for n_comp in range(15, 100, 5):
+        pick_components = n_comp
+        pca = PCA(n_components=pick_components).fit(dataset) # dataset.data
+    # fp_pca += '/new'
+    # maketree([fp_pca])
+    # analyse_principal_components(pca,stats,fp_pca,36, net, device)
     import ipdb; ipdb.set_trace()
 
     # UMAP -- `test_umap` will use directories `<fp_model_root>/umap/{,3d}`
-    fn_prefix = fp_model_root + '/umap'+ '/new'
-    os.makedirs(fn_prefix+'/3d', exist_ok=True)
+    fp_umap = fp_model_root + '/umap' # + '/new'
+    # os.makedirs(fp_umap+'/3d', exist_ok=True)
 
-    for nn in [7, 10, 20]:
-        # add option to reduce nn for 3d. 
-        dims = [2, 3] if (nn % 10 == 0) else [2]
-        for md in range(2, 8, 2):
-            for d in dims:
-                test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md*0.05, n_components=d)
+    umap_inverse_wrapper(stats, fp_umap, net, device)
+    # for d in [2, 3]:
+    # 	test_umap(stats, fp_umap, n_neighbors=7, min_dist=0.07, n_components=d) 
+
+    # for nn in [2, 3, 4, 5, 7, 10, 20, 50, 100, 200, 300]:
+    # 	# add option to reduce nn for 3d. 
+    # 	dims = [2] # , 3] if (nn % 10 == 0) else [2]
+    # 	for md in [0, 0.01, 0.02, 0.05, 0.07, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.99]:
+    # 		for d in dims:
+    # 			test_umap(stats, fp_umap, n_neighbors=nn, min_dist=md, n_components=d)
 
     mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
+    cleanup_version_f(fp_vmarker)
 
     return
 
@@ -205,6 +215,198 @@ def label_zs(z_s):
         fill_val += 1
     return z, y
 
+def make_interpolated_grid(angles=None):
+    '''
+    make grid.
+    angles should be: 
+        - (xmin, ymin, xmax, ymax) of type int.
+    '''
+    
+    # xmin, ymin, xmax, ymax = angles
+    # angles = [[xmin, ymax], [xmax, ymax], [xmin, ymin], [xmax, ymin]]
+
+    corners = np.array(angles)
+    test_pts = np.array([
+        (corners[0]*(1-x) + corners[1]*x)*(1-y) +
+        (corners[2]*(1-x) + corners[3]*x)*y
+        for y in np.linspace(0, 1, 10)
+        for x in np.linspace(0,1,10)
+    ])
+    return test_pts
+
+
+def rotate_around_point(point, radians, origin=(0, 0)):
+    """Rotate a point around a given point.
+    [taken from https://gist.github.com/LyleScott/e36e08bfb23b1f87af68c9051f985302]
+    I call this the "low performance" version since it's recalculating
+    the same values more than once [cos(radians), sin(radians), x-ox, y-oy).
+    It's more readable than the next function, though.
+    """
+    x, y = point
+    ox, oy = origin
+
+    qx = ox + np.cos(radians) * (x - ox) + np.sin(radians) * (y - oy)
+    qy = oy + -np.sin(radians) * (x - ox) + np.cos(radians) * (y - oy)
+
+    return qx, qy
+
+
+def translation_matrix(xy, to_origin=True):
+    transl_mtx= np.eye(3)
+    if to_origin:
+        transl_mtx[:-1, -1] = -1 * xy # grid back inplace.
+    else:
+        transl_mtx[:-1, -1] = xy # grid back inplace.
+    return transl_mtx
+
+def scale_matrix(xy_scale_factors):
+    x_sf, y_sf = xy_scale_factors
+    return np.array([[x_sf,0,0],[0,y_sf,0], [0,0,1]]) # only scale x, rest is rotation.
+
+def rotation_matrix(angle):
+    theta = angle
+    return np.array([[np.cos(theta), np.sin(theta), 0], [-np.sin(theta), np.cos(theta), 0],[0,0,1]])
+
+def make_grid(boundaries, degrees=0, scale_factor = 0.5, edge_scale_factors=(0.3, 1)):
+    xmin, ymin, xmax, ymax = boundaries
+    # get center of grid.
+    radians = degrees * np.pi / 180 # TODO define degrees
+    grid_center = np.array((xmin + (xmax-xmin) / 2, ymin + (ymax-ymin) / 2))
+    # make array for affine transf. out of upper/lower/left/right boundaries.
+    vertices = np.array([[xmin, ymax], [xmax, ymax], [xmin, ymin], [xmax, ymin]])
+    vertices = np.concatenate([vertices, np.ones(vertices.shape[0]).reshape(vertices.shape[0],1)], axis=1)
+    # translation matrix: to origin and back to grid centre (or point cloud center).
+    transl_mtx_to_origin = translation_matrix(grid_center)
+    transl_mtx_to_grid_center = translation_matrix(grid_center, to_origin=False)
+    # define scaling matrix (for upper edge first, whole matrix then)
+    edge_scale_mtx = scale_matrix(edge_scale_factors)
+    scale_mtx = scale_matrix((scale_factor, scale_factor))
+    # define rotation matrix
+    rot_mtx = rotation_matrix(radians)
+
+    # Apply transformations.
+    alt_mtx = transl_mtx_to_origin.dot(vertices.T)
+    # only change upper edge, the rest is integral to the whole frame
+    alt_mtx[:,:2] = edge_scale_mtx.dot(alt_mtx[:, :2])
+    alt_mtx = scale_mtx.dot(alt_mtx)
+    alt_mtx = rot_mtx.dot(alt_mtx)
+    alt_mtx = transl_mtx_to_grid_center.dot(alt_mtx).T
+    # produce smooth linear grid among vertices.
+    test_pts = make_interpolated_grid(alt_mtx)
+    return  test_pts
+
+def umap_inverse_wrapper(stats, fp_umap, net, device, n_neighbors_l=None):
+
+    dataset, col_arr = label_zs(stats['z'])
+    if not n_neighbors_l:
+        n_neighbors_l = [7, 10, 20, 200]
+        
+    for nn in n_neighbors_l:
+        deg = 45
+        knn = 100
+        knn_w = 'distance'
+        if fp_umap.split('/')[2] == "epoch_680":
+            grid_s = 0.35
+        else:
+            grid_s = 0.7
+
+        umap = UMAP(n_neighbors=nn, min_dist=0.02,
+                                n_components=2, random_state=42)
+        mapper = umap.fit(dataset)
+
+        fn = fp_umap+ '/l{}_nn{:d}_knn{:d}_d{:d}.jpg'.format(knn_w[:3],nn,knn,deg)
+        plot_inverse_umap(fn, n_neighbors=nn, knn=knn, deg_rot=deg, grid_scale=grid_s, y=col_arr,
+                          knn_weights=knn_w,mapper=mapper,net=net, device=device) # , grid_scale=0.8)
+
+
+def plot_knn_boundaries(x1, x2, y, nn=5, weights='distance', h=.02, ax=None):
+
+    from sklearn import neighbors
+    from matplotlib.colors import ListedColormap
+    # Lighter tab10 version:
+    tab20 = mpl.cm.get_cmap('tab20')
+    newcolors = tab20(np.linspace(0, 1, 20))[1::2]
+    dimmed_tab10= ListedColormap(newcolors)
+
+    clf = neighbors.KNeighborsClassifier(n_neighbors=nn, weights=weights)
+    dataset = np.c_[x1, x2]
+    clf.fit(dataset, y)
+
+    x_min, x_max = x1.min() - 1, x1.max() + 1
+    y_min, y_max = x2.min() - 1, x2.max() + 1
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h),
+                         np.arange(y_min, y_max, h))
+    Z = clf.predict(np.c_[xx.ravel(), yy.ravel()])
+
+    Z = Z.reshape(xx.shape)
+    if not ax:
+        plt.pcolormesh(xx, yy, Z, cmap='tab10', alpha=.2)
+    else:
+        ax.pcolormesh(xx, yy, Z, cmap=dimmed_tab10)
+        return ax, clf
+
+
+
+
+def plot_inverse_umap(filename, stats=None, n_neighbors=None, min_dist=0.02,
+                          n_components=2, deg_rot=45, mapper=None, y=None, knn=100,
+                          knn_weights=None, net=None, device=None, grid_scale=0.7, **kwargs):
+
+    if not mapper:
+        if not stats: raise ValueError
+        dataset, y = label_zs(stats['z'])
+        print('computing UMAP projection: ', end='')
+        print(f'n_neighbors = {n_neighbors}; min_dist = {min_dist}...', end='')
+        umap = UMAP(n_neighbors=n_neighbors, min_dist=min_dist,
+                    n_components=n_components,
+                    metric='euclidean', random_state=42)
+        mapper = umap.fit(dataset)
+
+    grid_boundaries = [mapper.embedding_[:,0].min(), mapper.embedding_[:,1].min(),
+              mapper.embedding_[:,0].max(), mapper.embedding_[:,1].max()]
+
+    test_pts = make_grid(grid_boundaries, degrees=deg_rot, scale_factor=grid_scale)
+    # setup grid
+    from matplotlib.gridspec import GridSpec
+    fig = plt.figure(figsize=(14,7))
+    gs = GridSpec(10, 20, fig)
+    scatter_ax = fig.add_subplot(gs[:, :10])
+    digit_axes = np.zeros((10, 10), dtype=object)
+    for i in range(10):
+        for j in range(10):
+            digit_axes[i, j] = fig.add_subplot(gs[i, 10+j])
+    # KNNeighbors
+    scatter_ax, knn_clf = plot_knn_boundaries(mapper.embedding_[:,0], mapper.embedding_[:,1],
+                                     weights=knn_weights, y=y, nn=knn, ax=scatter_ax)
+
+
+    # scatter embeddings. 
+    sctt_ax = scatter_ax.scatter(mapper.embedding_[:,0], mapper.embedding_[:,1], c=y.astype(np.int32), cmap='tab10', s=1)
+    # scatter_ax.set(xticks=[], yticks=[])
+    scatter_ax.scatter(test_pts[:,0], test_pts[:,1], marker='x', c='k', s=10, alpha=0.7)
+    inv_transformed_points = mapper.inverse_transform(test_pts[:,:-1])
+    # ### original Zs
+    # # keep original Zs for plotting; oriZ for generation
+    tZ = torch.from_numpy(inv_transformed_points.reshape(100,-1,28,28).astype(np.float32)).to(device)
+    tX, _ = net(tZ, reverse=True)
+    tX = torch.sigmoid(tX)
+    tX = tX.cpu().detach().numpy()
+
+    # plot generated digits:
+    for i in range(10):
+        for j in range(10):
+            digit_axes[i, j].imshow(tX[i*10+j].reshape(28, 28), cmap="gray")
+            digit_axes[i, j].set(xticks=[], yticks=[])
+    
+    handles, labels = sctt_ax.legend_elements(prop='colors')
+    scatter_ax.legend(handles, labels, loc='best')
+    # plt.title('n_neighbors = {:d}; min_dist = {:.2f}'.format(n_neighbors, min_dist))
+
+    plt.tight_layout()
+    plt.savefig(filename)
+    plt.close()
+    print(' Saved {}'.format(filename.split('/')[-1]))
+
 def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2,
                   metric='euclidean', **kwargs):
 
@@ -220,106 +422,158 @@ def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2,
 
     if n_components == 2:
         fig, ax = plt.subplots(figsize=(12,12))
-        scatter = ax.scatter(embeddings[:,0], embeddings[:,1], c=col_arr, cmap='Spectral', s=4)
+        scatter = ax.scatter(embeddings[:,0], embeddings[:,1], c=col_arr, cmap='tab10', s=4)
     elif n_components == 3:
         fn_prefix += '/3d'
         from mpl_toolkits.mplot3d import Axes3D
         fig = plt.figure(figsize=(11, 11))
         ax = fig.add_subplot(111, projection='3d')
-        scatter = ax.scatter(embeddings[:,0], embeddings[:,1], embeddings[:,2], alpha=0.3,
-                                                c=col_arr, cmap='Spectral', s=4)
+        scatter = ax.scatter(embeddings[:,0], embeddings[:,1], embeddings[:,2], alpha=0.5,
+                                                c=col_arr, cmap='tab10', s=4)
     
     handles, labels = scatter.legend_elements(prop='colors')
-    ax.legend(handles, labels, loc='best', title='off-line digits')
+    ax.legend(handles, labels, loc='best', title='classes')
     plt.title(f'n_neighbors = {n_neighbors}; min_dist = {min_dist}')
 
-    filename = fn_prefix + '/nn{:d}_md{:.1f}.jpg'.format(n_neighbors, min_dist, n_components)
+    filename = fn_prefix + '/nn{:d}_dim{}.jpg'.format(n_neighbors, n_components)
     plt.savefig(filename)
     plt.close()
     print(' Saved {}'.format(filename.split('/')[-1]))
 
 
-def analyse_principal_components(pca, stats, fp_pca,pk, n_rX_dig=10):
+def analyse_principal_components(pca, stats, fp_pca,pk, net=None, device=None, n_rX_dig=10):
     '''
     Arguments: 
         - pca: sklearn.decomposition. PCA object. after calling .fit()
-        - stats: Z stats
+         stats: Z stats
         - fp_pca: root filepath for plot saving.
         - pk: componets to show in plots.
     '''
-    print(f'first {pk} PC\'s plotted. ', end='')
-    fn = fp_pca + '/PC_grid.png'
-    plot_PCgrid(pca, pk=36, filename=fn)
-    print(f"Plotting reconstructed Z-spaces... ", end='')
-    fn = fp_pca + '/PC_rZ.png'
-    plot_rZ(pca, stats['z'], filename=fn, n_digits=n_rX_dig)
-    # fn = fp_pca + '/sheer_PCs.png'
-    # plot_PCA(pca, stats['z'], k=20, filename=fn)
+
+    print("plotting reconstructed Z... ", end='')
+    fn = fp_pca + '/rZ_ncomps{}.png'.format(pca.n_components_)
+    plot_rZ(pca, stats['z'], filename=fn, n_digits=n_rX_dig, net=net, device=device)
+    print("done.")
+    fn = fp_pca + '/sheer_PCs.png'
+    plot_PCA(pca, stats['z'], k=10, filename=fn)
+    print("plotting components in grid format... ", end='')
+    fn = fp_pca + '/PCgrid_unnorm_RdBu.png' # XXX TO CHANGE
+    plot_PCgrid(pca, fn)
+    print("done.")
     print("plotting variance explained... ", end='')
-    fn = fp_pca + '/pcaVE.png'
-    plot_expvar(pca.explained_variance_, pca.explained_variance_ratio_, fn)
+    fn = fp_pca + '/VE.png'
+    plot_expvar(pca.n_components_, pca.explained_variance_ratio_, fn)
+    print("done.")
     print("plotting reduced z's... ", end='')
-    fn = fp_pca + '/reduced_z.png'
-    plot_reduced_dataset(pca, stats['z'], k=20, filename=fn)
-    print("done")
+    fn = fp_pca + '/25reduced_z.png'
+    plot_reduced_dataset(pca, stats['z'], k=24, filename=fn)
+    print("done.")
 
 
 def plot_PCgrid(PCA, filename, pk=None, reconstruct=False):
     if not pk: # Plot Komponents
-        pk = PCA.n_components_
+        pk = min(PCA.n_components_, 25)
     components = PCA.components_
     var_exp = PCA.explained_variance_
     # y = PCs['y']
-
     nrows = ncols = int(pk ** 0.5)
+    # nrows +=1
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, 10))
     components = components.reshape(-1, 28, 28)
-    cmap = plt.cm.magma
+    # components = (comp - comp.min()) / (comp.max() - comp.min())
+    cmap = plt.cm.RdBu
     axs[0, 0].imshow(PCA.mean_.reshape(28, 28), cmap=cmap)
     axs[0, 0].set_title('$\mu$')
-    pc_i = 1
+    pc_i = 0
     for row in range(nrows):
         for col in range(ncols):
             if col == 0 and row == 0: continue
-            axs[row, col].imshow(components[row+col], cmap=cmap)
-            axs[row, col].set_title(f'PC{pc_i}')
+
+            if pc_i < pk: # for the case where pca.n_components < 25
+                axs[row, col].imshow(components[pc_i], cmap=cmap)
+                axs[row, col].set_title('PC{}'.format(pc_i+1))
+            # else:  # if pc_i >= pk:
+            # 	import ipdb; ipdb.set_trace()
+            # 	# axs[row, col].remove()
+            # 	# axs[row, col] = None
             pc_i += 1
+
+
+    plt.tight_layout()
+    fig.subplots_adjust(top=.88)
     plt.savefig(filename)
-    del components, var_exp
+    plt.close()
 
-def plot_rZ(pca, z_s, filename, n_digits):
 
-    components = pca.components_
-    var_exp = pca.explained_variance_
-    z_s, y = label_zs(z_s) # XXX FIX THE FOX XXX
 
-    # red_z = pca.transform(z_s)
-    # rec_Z = pca.inverse_transform(red_z)
+
+def plot_rZ(pca, z_s, filename, n_digits, net, device):
+
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
+    z_s, y = label_zs(z_s) # Z_s array of shape 10000x28x28; y array of shape 10000
 
     nrows, ncols = n_digits, 10 # n o'categories
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(10, n_digits))
-    components = components.reshape(-1, 28, 28)
-    cmap = plt.cm.magma
+    h_size = n_digits
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(h_size*2, h_size))
+    cmap = plt.cm.RdBu
+    zcmap = plt.cm.gray
     # axs[0, 0].imshow(PCs['mean'].reshape(28, 28))
     # axs[0, 0].set_title('\mu')
     pc_i = 1
+    # import ipdb; ipdb.set_trace()
+
     for col in range(ncols):
+        # select n_digits where y == col from oriZ.
         dig_idx = np.argwhere(y == col)
         dig_idx = np.random.choice(dig_idx.flatten(), nrows, replace=False)
-        red_z = pca.transform(z_s[dig_idx])
-        rec_Z = pca.inverse_transform(red_z)
-        dig_rX = (rec_Z.reshape(-1, 28, 28) - rec_Z.min() ) / (rec_Z.max() - rec_Z.min())
-        # normalize over array dig_rX
+        ori_Z = z_s[dig_idx].astype(np.float32)
+        ### original Zs
+        # keep original Zs for plotting; oriZ for generation
+        oriZ = torch.from_numpy(ori_Z.reshape(nrows,-1,28,28)).to(device)
+        oriX, _ = net(oriZ, reverse=True)
+        oriX = torch.sigmoid(oriX)
+        oriX = oriX.cpu().detach().numpy()
+        # Transform with PCA explained by MLE.
+        red_Z = pca.transform(ori_Z.reshape(-1,784))
+        rec_Z = pca.inverse_transform(red_Z)
+        ### reconstruced Zs
+        rec_Z = rec_Z.reshape(-1, 28, 28)
+        # keep rec_Z for plotting; recZ for generation.
+        recZ = torch.from_numpy(rec_Z.reshape(nrows,-1,28,28).astype(np.float32)).to(device)
+        recX, _ = net(recZ, reverse=True)
+        recX = torch.sigmoid(recX)
+        recX = recX.cpu().detach().numpy()
+        ### normalize over array dig_rZ
+        dig_rZ = (rec_Z - rec_Z.min()) / (rec_Z.max() - rec_Z.min())
         axs[0, col].set_title(f"{col}")
 
         for row in range(nrows):
-            axs[row, col].imshow(dig_rX[row], cmap=cmap)
-            # axs[row, col].set_title(f'PC{pc_i}')
+            axs[row, col].imshow(dig_rZ[row], cmap=cmap)
+
             axs[row, col].tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False,
                     right=False, left=False, labelleft=False)
+
+            # oriX_imbox.image.axes = axs[row, col]
+            annotext = "$O\;\mu: {:.2f}, \sigma: {:.2f} || R\;\mu: {:.2f}, \sigma:{:.2f}$".format(
+                    ori_Z[row].mean(), ori_Z[row].std(), rec_Z[row].mean(), rec_Z[row].std())
+            axs[row, col].set_xlabel(annotext, fontsize='xx-small')
+
+            # Show original and reconstructed X
+            oriX_imbox = OffsetImage(oriX[row].reshape(28,28), zoom=0.5, cmap=zcmap)
+            oX_ab = AnnotationBbox(oriX_imbox, xy=(-0.5, 0.5), 
+                              xycoords='data', boxcoords="axes fraction")
+            axs[row, col].add_artist(oX_ab)
+
+            recX_imbox = OffsetImage(recX[row].reshape(28, 28), zoom=0.5, cmap=zcmap)
+            # x_imagebox.image.axes = axs[row, col]
+            rX_ab = AnnotationBbox(recX_imbox, xy=(1.5, 0.5), 
+                              xycoords='data', boxcoords="axes fraction")
+            axs[row, col].add_artist(rX_ab)
+
+    plt.tight_layout()
     plt.savefig(filename)
     plt.close()
-    del components, var_exp, z_s
 
 def PCA_eig_np(Z, k, center=True, scale=False):
     '''
@@ -390,7 +644,7 @@ def plot_reduced_dataset(pca, z_s, k, filename):
         y = np.take(y, indices)
         for col in range(n_pcs):
             if row > col:
-                axs[row, col].scatter(reduced_z[:,row], reduced_z[:,col], c=y, cmap=cmap, s=.50, alpha=0.6)
+                path_c = axs[row, col].scatter(reduced_z[:,col], reduced_z[:,row], c=y, cmap=cmap, s=.50, alpha=0.6)
                 axs[row, col].annotate('% VE:\nC{}={:.2f}\nC{}={:.2f}'.format(n_pcs - row, ratio_var_exp[row]*100,
                                          n_pcs-col, ratio_var_exp[col]*100), xy=(7, 7), fontsize='xx-small')
                 if row == n_pcs-1:
@@ -402,6 +656,10 @@ def plot_reduced_dataset(pca, z_s, k, filename):
             else:
                 axs[row, col].remove()
                 axs[row, col] = None
+
+    handles, labels = path_c.legend_elements(prop='colors')
+    plt.legend(handles, labels, bbox_to_anchor=(.75, .75), loc="upper right", 
+               bbox_transform=fig.transFigure)
     
     fig.tight_layout()
     fig.subplots_adjust(top=.88)
@@ -417,8 +675,8 @@ def plot_PCA(pca, z_s, k, filename):
         z_s, y = label_zs(z_s)
         reduced_Z = pca.transform(z_s)
 
-    n_pcs = len(var_exp) # can use this to index components and create grid.
-    fs = n_pcs * 2
+    n_pcs = np.min([15, pca.n_components_]) # pca.n_components_ # can use this to index components and create grid.
+    fs = int( n_pcs * 1.6) # n_pcs * 2
     fig, axs = plt.subplots(n_pcs, n_pcs, figsize=(fs, fs), sharex='col', sharey='row')
     
     for row in range(n_pcs):
@@ -445,15 +703,26 @@ def plot_PCA(pca, z_s, k, filename):
 
     
 
-def plot_expvar(var_exp, r_var_exp, filename):
+def plot_expvar(n_pcs, r_var_exp, filename):
     
     fig, ax = plt.subplots(figsize=(10,5))
 
-    n_pcs = len(var_exp)
-    ax.plot(np.cumsum(r_var_exp))
+    # n_pcs = len(var_exp)
+    cs = np.cumsum(r_var_exp)
+    ax.plot(cs)
+
     ax.set_ylabel("cumulative ratio of explained variance")
+
+    ax.axhline(cs[-1], color="k", alpha=0.5)
+
+    trans = mpl.transforms.blended_transform_factory(
+              ax.get_yticklabels()[0].get_transform(), ax.transData)
+    ax.text(0, cs[-1], "{:.4f}".format(cs[-1]), color="blue", transform=trans,
+              ha="right", va="center")
+    
     # plt.title("variance explained first PC")
     plt.savefig(filename)
+    plt.close()
 
 
 def test_arrays():
@@ -590,16 +859,19 @@ def sample_from_crafted_z(net, all_nz, absolute, kept, reps, device, save_dir, m
     del x, z, images_concat, mask_zs
     # return x, z
 
-def plot_grand_z(ndarray, filename, n_rows_cols=(2, 5)):
+def plot_grand_z(ndarray, filename, n_rows_cols=(2, 5), norm=True):
     # mpl.rc('text', usetex=True)
     # mpl.rcParams['text.latex.preamble']=[r"\boldmath"]
 
     n_rows, n_cols = n_rows_cols
     fig, axs = plt.subplots(n_rows, n_cols, sharex='all', sharey='all', figsize=(10, 7))
+    cmap = plt.cm.RdBu
+    if norm:
+        ndarray = (ndarray - ndarray.min()) / (ndarray.max() - ndarray.min())
     n = 0
     for col in range(n_cols):
         for row in range(n_rows):
-            axs[row, col].imshow(ndarray[n])
+            axs[row, col].imshow(ndarray[n], cmap=cmap)
             ttl = r"Grand-${{z}}$ for {}".format(n)
             axs[row, col].title.set_text(ttl)
             n += 1
@@ -805,9 +1077,11 @@ def scatter_alldigits(stats, filename, m_epoch):
     plt.ylabel('std')
 
     for dig in range(10):
-        ax.scatter(means[dig], stds[dig], c=colors[dig], label=str(dig), alpha=.8, s=.8)
+        ax.scatter(means[dig], stds[dig], c=colors[dig], label=str(dig), cmap='rainbow',
+                alpha=.8, s=.8)
     ax.legend()
     plt.savefig(filename, bbox_inches='tight')
+    plt.close()
     print('\nPlot saved to: ' + filename)
 
 
@@ -1049,15 +1323,24 @@ def cleanup_version_f(fp_vmarker):
 
     tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '%')
 
+    _removal_strings = ['V-', '']
+    # _removal_strings += ['V-G.' + str(i) for i in range(5)] # gaussian analyses
+
     print("filtering analyses versions: ")
+    found_versions = []
     with open(fp_vmarker, 'r') as v:
         with open(tmp_fp_vmarker, 'w') as t:
             for l in v:
                 stripped = l.strip()
-                if stripped == 'V-' or stripped == '':
+                if stripped in _removal_strings:
+                    continue
+                elif stripped in found_versions:
+                    print(f'skipping multiple {stripped}...', end='')
                     continue
                 else:
                     t.write(l)
+                    found_versions.append(stripped)
+                    print()
                     print("keeping: {}".format(l))
     shutil.move(tmp_fp_vmarker, fp_vmarker)
     
@@ -1104,7 +1387,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', '-ds', default='mnist', type=str, help='MNIST or CIFAR-10')
     # parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
 
-    version_ = 'V-0.5' # new PCA = 0.5
+    version_ = 'V-0.7' # new PCA, new UMAP = 0.6
     # Analysis
     parser.add_argument('--force', '-f', action='store_true', default=False, help='Re-run z-space anal-yses.')
     parser.add_argument('--version', '-v', default=version_, type=str, help='Analyses iteration')
@@ -1158,9 +1441,12 @@ if __name__ == '__main__':
 
 
 
-    # for i in range(580, 690, 10):
-    # 	print("Testing epoch {}...".format(i), end='')
-    model_meta_stuff = select_model(root_dir_, version_, test=680)
-    main(parser.parse_args(), model_meta_stuff)
-    # 	print(" done.")
+
+    # for i in [640, 670, 680]: # , 680]: # range(120, 690, 10):
+    for i in [640, 660, 670, 680]: # , 680]: # range(120, 690, 10):
+        print("Testing epoch {}...".format(i), end='')
+        model_meta_stuff = select_model(root_dir_, version_, test=i)
+        main(parser.parse_args(), model_meta_stuff)
+    print(" done.")
+
 

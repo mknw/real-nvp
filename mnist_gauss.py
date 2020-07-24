@@ -92,6 +92,7 @@ def main(args, model_meta_stuff = None):
     # p-vals, KS p-vals, mu, sigma, skewness, kurtosis, quartiles (.1, .25, .5, .75, .9)
     p, ksp, m, s, b1, b2, qs = distribution_momenta(z) # for each instance. 
 
+
     mng_gauss_meas(p, ksp, args.pgaussfile, n_epoch=epoch)
 
     plot_kde(z, y, np.concatenate(stats['x'], axis=0),
@@ -129,6 +130,101 @@ def mng_gauss_meas(p_vals, ks_p_vals, filename='g_test.txt', n_epoch=999):
         f.write('{},{},{},{},{},{}\n'.format(n_epoch, p_avg, p_min, p_max,
                                          ks_p_avg, ks_p_min, ks_p_max))
 
+
+def box_pvals(filename='box_gauss.png', root_prefix='data/dense_test6/epoch_',
+        stats_fn='/zlatent_mean_std_Z.pkl', ks_test=True):
+
+    # stats_filename = fp_model_root + '/zlatent_mean_std_Z.pkl'
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    # epoch=120 # XXX XXX XXX
+    # stats_filename = root_prefix + str(epoch) + stats_fn
+    # stats = torch.load(stats_filename)
+    # z, _ = label_zs(stats['z'])
+    # p_vals, kp_vals, mus, sigmas, s_vals, k_vals, qs = distribution_momenta(z)
+    for epoch in range(120, 690, 10):
+
+        stats_filename = root_prefix + str(epoch) + stats_fn
+        stats = torch.load(stats_filename)
+        z, _ = label_zs(stats['z'])
+        
+        p_vals, kp_vals, mus, sigmas, s_vals, k_vals, qs = distribution_momenta(z)
+
+        if ks_test:
+            color_median=  '#2aa198'# blue solarized
+            p_vals = kp_vals
+        else:
+            color_median = '#cb4b16' # red solarized
+
+        medianprops = dict(linestyle='-', linewidth=1, color=color_median)
+        ax.boxplot(p_vals, notch=True, widths=5.6, positions=[epoch], showfliers=False, medianprops=medianprops)
+
+    
+    ax.set_yscale('log')
+    visible_ticks = [i for i in range(120, 690, 10)]
+    # visible_ticks = [item for sublist in visible_ticks for item in sublist]
+    labels = [i for i in range(120, 690, 10)]
+    plt.xticks(visible_ticks, labels=labels, fontsize='x-small', rotation="vertical")
+
+    import matplotlib.patches as mpatches
+    if ks_test:
+        leg_path = mpatches.Patch(color='#2aa198', label='Kolmogorov Smirnov')
+    else:
+        leg_path = mpatches.Patch(color='#cb4b16', label='Skewness Kurtosis')
+    plt.legend(handles=[leg_path], loc="lower right")
+
+    ax.grid(which='major', alpha=0.5, axis='x')
+    plt.xlim((110, 690))
+    plt.ylabel("p-values")
+    if ks_test: fp = 'figs/k' + filename
+    else: fp = 'figs/' + filename
+    plt.savefig(filename)
+    plt.close()
+
+def scatter_pvals(filename='figs/scatter_gauss.png', root_prefix='data/dense_test6/epoch_', stats_fn='/zlatent_mean_std_Z.pkl'):
+
+    # stats_filename = fp_model_root + '/zlatent_mean_std_Z.pkl'
+    
+    fig, ax = plt.subplots(figsize=(10, 7))
+    import matplotlib.patches as mpatches
+    kspath = mpatches.Patch(color='#2aa198', label='Kolmogorov Smirnov')
+    gpath = mpatches.Patch(color='#cb4b16', label='Skewness Kurtosis')
+    # import ipdb; ipdb.set_trace()
+    # epoch=120 # XXX XXX XXX
+    # stats_filename = root_prefix + str(epoch) + stats_fn
+    # stats = torch.load(stats_filename)
+    # z, _ = label_zs(stats['z'])
+    # p_vals, kp_vals, mus, sigmas, s_vals, k_vals, qs = distribution_momenta(z)
+    # n = kp_vals.shape[0]
+    for epoch in range(120, 690, 10):
+
+        stats_filename = root_prefix + str(epoch) + stats_fn
+        stats = torch.load(stats_filename)
+        z, _ = label_zs(stats['z'])
+        
+        p_vals, kp_vals, mus, sigmas, s_vals, k_vals, qs = distribution_momenta(z)
+
+        n = kp_vals.shape[0]
+        y = np.repeat(epoch, n).astype(np.float16)
+        ax.scatter(y, kp_vals, color='#2aa198', marker='x', s=4)
+        y += 5
+        ax.scatter(y, p_vals, color='#cb4b16', marker='_', s=1)
+    
+    ax.set_yscale('log')
+    visible_ticks = [i for i in range(120, 690, 10)]
+    # visible_ticks = [item for sublist in visible_ticks for item in sublist]
+    labels = [i for i in range(120, 690, 10)]
+    # labels = [item for sublist in labels for item in sublist]
+    plt.xticks(visible_ticks, labels=labels, fontsize='x-small', rotation="vertical")
+
+    plt.legend(handles=[kspath, gpath], loc="lower right")
+
+    ax.grid(which='major', alpha=0.5, axis='x')
+    plt.xlim((110, 690))
+    plt.ylabel("p-values")
+    plt.savefig(filename)
+    plt.close()
+        
 
 def plot_pvals(filename, log_fp='test_gAUSs.txt'):
     import pandas as pd
@@ -175,9 +271,6 @@ def distribution_momenta(z, quantiles=[0.1,0.25, 0.5, 0.75,0.9], mean=False, idx
         return (p_vals,ks_p_vals,mus,sigmas,s_vals,k_vals,quartiles)
     else:
         return (p_vals,mus,sigmas,s_vals,k_vals,quartiles)
-
-
-
 
 
 def ndim_kstest(z, axis=1, cdf=None, args=()):
@@ -359,9 +452,10 @@ if __name__ == '__main__':
     parser.add_argument('--pgaussfile', default=pgaussfile_, type=str, help='log gaussianity to file')
     
 
-    # for i in range(120, 690, 10):
-    # 	model_meta_stuff = select_model(root_dir_, version_, test=i)
-    # 	main(parser.parse_args(), model_meta_stuff)
-    # 	print(" done.")
-    plot_pvals('figs/dmnist_gauss_iso.png', pgaussfile_)
+    box_pvals()
+    # for i in [640, 680]:  # range(120, 690, 10):
+    # model_meta_stuff = select_model(root_dir_, version_, test=640)
+    # main(parser.parse_args(), model_meta_stuff)
+    # # 	print(" done.")
+    # plot_pvals('figs/dmnist_gauss_iso.png', pgaussfile_)
 

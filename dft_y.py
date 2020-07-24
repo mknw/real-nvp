@@ -107,12 +107,12 @@ def main(args, model_meta_stuff = None):
     plot_regr(momenta_sims, dct_sim_mtx, x_labels, fp_simil + '/regr_sub.png')
 
 
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
 
     heatmap(dct_sim_mtx, filename = fp_simil + '/dct_sim.png',
             plot_title = 'Average distance in fourier space (DCT)')
 
-    # mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
+    mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
     cleanup_version_f(fp_vmarker)
 
 def purify_mtx(x):
@@ -259,8 +259,10 @@ if __name__ == '__main__':
     parser.add_argument('--pgaussfile', default=pgaussfile_, type=str, help='log gaussianity to file')
     
 
-    for i in range(120, 690, 10):
-        model_meta_stuff = select_model(root_dir_, version_, test=680)
+    for i in range(120, 680, 10):
+        if i in [640, 670]:
+            continue
+        model_meta_stuff = select_model(root_dir_, version_, test=i)
         main(parser.parse_args(), model_meta_stuff)
     # 	print(" done.")
     # plot_pvals('figs/dmnist_gauss_iso.png', pgaussfile_)
