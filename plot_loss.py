@@ -56,7 +56,7 @@ den_mnist_param_loss= {
                  'log_fp' : 'data/dense_test6/log',
                  'filename': './figs/dmnist_loss.png',
                  # 'ylimits': (400, 1100),
-                 'ylimits': (600, 2500),
+                 'ylimits': (600, 2250),
                  # 'threshold': 1100,
                          'train': True,
                          'test': True,
@@ -68,32 +68,7 @@ den_mnist_param_loss= {
 den_mnist_param_bpd = {
                  'log_fp' : 'data/dense_test6/log',
                  'filename': './figs/dmnist_bpd.png',
-                 'ylimits': (0, 5),
-                 # 'threshold': 1100,
-                         'train': True,
-                         'test': True,
-                         'loss': False,
-                         'bpd': True,
-                         'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
-                         }
-
-res_mnist_param_loss = {
-                 'log_fp' : 'data/res_3-8-32/log',
-                 'filename': './figs/rmnist_loss.png',
-                 # 'ylimits': (400, 1100),
-                 'ylimits': (600, 3300),
-                 # 'threshold': 1100,
-                         'train': True,
-                         'test': True,
-                         'loss': True,
-                         'bpd': False,
-                         'hi_epochs': 0 # [121, 133, 138, 160, 164, 182, 196, 240, 251, 252, 254]
-                         }
-
-res_mnist_param_bpd = {
-                 'log_fp' : 'data/res_3-8-32/log',
-                 'filename': './figs/rmnist_bpd.png',
-                 'ylimits': (0, 6),
+                 'ylimits': (1, 4.5),
                  # 'threshold': 1100,
                          'train': True,
                          'test': True,
@@ -108,7 +83,7 @@ den_celeba_params_loss = {
                                              'filename': './figs/dceleba_loss.png',
                                              'train': True,
                                              'test': True,
-                                             'ylimits': (20000, 28000),
+                                             'ylimits': (22500, 30000),
                                              'loss': True,
                                              'bpd': False
                                              }
@@ -118,7 +93,7 @@ den_celeba_params_bpd = {
                                             'filename': './figs/dceleba_bpd.png',
                                             'train': True,
                                             'test': True,
-                                            'ylimits': (2.5, 3.3),
+                                            'ylimits': (2.65, 3.5),
                                             'loss': False,
                                             'bpd': True
                                             }
@@ -128,10 +103,8 @@ den_celeba_params_bpd = {
 if __name__ == '__main__':
     # with everything
 
-    # plot_loss(**den_mnist_param_loss)
-    # plot_loss(**den_mnist_param_bpd)
-    plot_loss(**res_mnist_param_loss)
-    plot_loss(**res_mnist_param_bpd)
+    plot_loss(**den_mnist_param_loss)
+    plot_loss(**den_mnist_param_bpd)
     plot_loss(**den_celeba_params_loss)
     plot_loss(**den_celeba_params_bpd)
 

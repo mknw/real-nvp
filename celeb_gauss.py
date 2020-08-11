@@ -22,9 +22,10 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import seaborn as sns
 
 from scipy import stats  as distatis
-from lockandload import * #select_model, mark_version, load_network, track_z, label_zs
+from celeb_simil import * #select_model, mark_version, load_network, track_z, label_zs
+from mnist_simil import cleanup_version_f
 
-def main(args, model_meta_stuff = None):
+def analyse_epoch(args, model_meta_stuff = None):
     device = torch.device("cuda:0" if torch.cuda.is_available() and len(args.gpu_ids) > 0 else "cpu")
     print("evaluating on: %s" % device)
 
@@ -33,73 +34,203 @@ def main(args, model_meta_stuff = None):
         fp_model_root, fp_model, fp_vmarker = select_model(args.root_dir, args.version, test=i)
     else:
         fp_model_root, fp_model, fp_vmarker = model_meta_stuff
+    
 
-    mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
+    # mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
 
     epoch = fp_model_root.split('_')[-1]
     ''' stats filenames memo: '''
-    # 1: '/z_mean_std.pkl' # XXX obsolete! XXX
-    # 2: '/latent_mean_std_Z.pkl'
-    stats_filename = fp_model_root + '/zlatent_mean_std_Z.pkl'
-    if os.path.isfile(stats_filename) and not args.force:
+    stats_filename = fp_model_root + '/z_mean_std.pkl'
+    if os.path.isfile(stats_filename) and not args.force and not args.tellme_y:
         print('Found cached file, skipping computations of mean and std.')
         stats = torch.load(stats_filename)
     else:
         if args.dataset == 'mnist':
-            transform_train = transforms.Compose([
-                transforms.ToTensor()
-                # transforms.ColorJitter(brightness=0.3)
-            ])
-            #torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-            transform_test = transforms.Compose([
-                transforms.ToTensor()
-            ])
-            # trainset = torchvision.datasets.MNIST(root='data', train=True, download=True, transform=transform_train)
-            # trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-            testset = torchvision.datasets.MNIST(root='data', train=False, download=True, transform=transform_test)
-            testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-            print('Building model..') 
-
+            from celeb_simil import load_mnist_test 
+            testloader = load_mnist_test(args)
+        elif args.dataset.lower() == 'celeba':
+            from celeb_simil import load_celeba_test
+            testloader = load_celeba_test(args)
         elif args.dataset == 'CIFAR-10':
-            # Note: No normalization applied, since RealNVP expects inputs in (0, 1).
-            transform_train = transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor()
-            ])
-            #torchvision.transforms.Normalize((0.1307,), (0.3081,)) # mean, std, inplace=False.
-            transform_test = transforms.Compose([
-                transforms.ToTensor()
-            ])
-            trainset = torchvision.datasets.CIFAR10(root='data', train=True, download=True, transform=transform_train)
-            trainloader = data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
-            testset = torchvision.datasets.CIFAR10(root='data', train=False, download=True, transform=transform_test)
-            testloader = data.DataLoader(testset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-            print('Building model..')
-            net = RealNVP(num_scales=2, in_channels=3, mid_channels=64, num_blocks=8)
+            from celeb_simil import load_cifar_test 
+            testloader = load_cifar_test(args)
 
-        net = load_network( fp_model, device, args)
-        loss_fn = RealNVPLoss()
+        if not args.tellme_y: # make it explicit, it is better.
+            net = load_network( fp_model, device, args)
+            loss_fn = RealNVPLoss()
+            if args.track_x:
+                stats, x_cA = track_z_celeba(net, testloader, device, loss_fn, track_x=True)
+                torch.save(x_cA, 'data/1_den_celeba/x.pkl')
+            else:
+                stats = track_z_celeba(net, testloader, device, loss_fn, track_x=False)
+            torch.save(stats, stats_filename)
+
+    ''' Attributes annotation '''
+    if args.tellme_y:
+        if 'net' not in dir():
+            net = load_network( fp_model, device, args)
+        y = tellme_ys(load_network(fp_model, device, args), testloader, device)
+        attr_y = Attributes().make_and_save_dataframe(y)
+    else:
+        attr_y = Attributes().fetch()
+        '''previous tracking xz'''
         # stats = track_distribution(net, testloader, device, loss_fn)
-        stats = track_xz(net, testloader, device, loss_fn)
-        torch.save(stats, stats_filename)
+        # stats = track_xz(net, testloader, device, loss_fn)
+        # torch.save(stats, stats_filename)
 
     fp_distr = fp_model_root + '/distr' # distributions
+    # from celeb_simil import maketree
+    def lstify(s):
+        if isinstance(s, str):
+            return [s]
+        elif isinstance(s, list):
+            return s
+    maketree = lambda l: [os.makedirs(p, exist_ok=True) for p in lstify(l)]
+    maketree(fp_distr)
     # reminder: type(epoch) == str
     # import ipdb; ipdb.set_trace()
-    z, y = label_zs(stats['z'])
+    # z, y = label_zs(stats['z'])
+    z = stats['z'].reshape(stats['z'].shape[0], -1)
     # p-vals, KS p-vals, mu, sigma, skewness, kurtosis, quartiles (.1, .25, .5, .75, .9)
     p, ksp, m, s, b1, b2, qs = distribution_momenta(z) # for each instance. 
+    # write_minmaxavg_tofile(p, ksp, args.pgaussfile, n_epoch=epoch)
 
-    mng_gauss_meas(p, ksp, args.pgaussfile, n_epoch=epoch)
+    # TODO import 'x' differently
+    if args.kde:
+        x = torch.load('data/1_den_celeba/x.pkl')
+        x = x['x']
 
-    plot_kde(z, y, np.concatenate(stats['x'], axis=0),
-               n_hists=3, filename=fp_distr + '/gauss_hist.png', n_epoch=epoch)
+        # plot KDEs for each attribute
+        part_length = 8
+        n_segments = int(40 / part_length)
+        partitioned_attributes = [[i + part_length*j for i in range(part_length)] for j in
+                range(n_segments)] # == 40
+        cntr = 0
+        for att_selection in partitioned_attributes:
+            fn = fp_distr + '/gauss_hist_{}-{}.png'.format(att_selection[0], att_selection[-1])
+            plot_kde(z,x,attr_y,att_sel=att_selection,nrows=8,filename=fn,n_epoch=epoch)
+            print(f'plotted {fn}')
+            cntr += 1
 
-    mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
-    cleanup_version_f(fp_vmarker)
+    # mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
+    cleanup_version_f(fp_vmarker, _removal_strings=['']) # only remove empty lines
+    return epoch, p, ksp
 
 
-def mng_gauss_meas(p_vals, ks_p_vals, filename='g_test.txt', n_epoch=999):
+def main(args, epochs=[300, 451, 500, 600, 700], save=True, force=False, kde=False):
+
+
+    # import ipdb; ipdb.set_trace()
+    p_value_counts = dict()
+    for e in epochs: # [300, 400, 500, 600]:
+        model_meta_stuff = select_model(args.root_dir, args.version, test=e)
+        # make kde plots, return pval stats 
+
+        fp_model_root, fp_model, fp_vmarker = model_meta_stuff
+        mark_version(args.version, fp_vmarker) # echo '\nV-' >> fp_vmarker
+
+        pcount_fn = fp_model_root + '/gauss_pvalue_counts.pkl'
+
+        if isinstance(kde, int):
+            args.kde = (e == kde) #  TO REMOVE?
+        else:
+            args.kde = kde
+
+        if not os.path.isfile(pcount_fn) or force or args.kde:
+            e, p, ksp = analyse_epoch(args, model_meta_stuff)
+            # if not os.path.isfile(pcount_fn) or force:
+            p_counts_epoch = bin_pvals_in_thresholds(p)
+            p_value_counts[int(e)] = {'norm': p_counts_epoch}
+            p_counts_epoch = bin_pvals_in_thresholds(ksp)
+            p_value_counts[e]['ks'] = p_counts_epoch
+            if save:
+                torch.save(p_value_counts[e], pcount_fn)
+        else:
+            e_d = torch.load(pcount_fn)
+            # one-off code. 
+            # if str(list(e_d.keys())[0]) == '300':
+            # 	clean_d = e_d['300']
+            # 	e_d = clean_d
+            # 	torch.save(e_d, pcount_fn)
+            
+            p_value_counts[e] = e_d
+        mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
+
+    fn = 'figs/{}_dc_gautest.png'.format('e' + str(len(epochs)))
+    histogram_gaussianity(p_value_counts, fn)
+    fn = 'figs/{}_dc_ksgautest.png'.format('e' + str(len(epochs)))
+    histogram_gaussianity(p_value_counts, fn, test='ks')
+
+def bin_pvals_in_thresholds(pvals):
+
+    thresholds = np.geomspace(1e-9, .1, num=9)
+    
+    counts = np.zeros(len(thresholds), dtype=np.int32)
+
+    n_previous_th = 0
+    for i, th in enumerate(thresholds):
+        n_below_th = (pvals < th).sum()
+        counts[i] = n_below_th - n_previous_th
+        n_previous_th = n_below_th
+
+    if pvals.shape[0] - np.sum(counts) != 0:
+        counts = np.append(counts, pvals.shape[0] - np.sum(counts))
+        thresholds = np.append(thresholds, 0)
+
+    output = dict(zip(thresholds, counts))
+    print(output)
+    
+    return output
+
+def histogram_gaussianity(p_value_counts, filename, test='norm'):
+    
+    fig, axs = plt.subplots(figsize=(12, 8))
+
+    n_thresholds = len(p_value_counts[list(p_value_counts.keys())[0]][test])
+    width = .5
+    hist_width = width * n_thresholds
+    spacing = 1
+    x_ctr = hist_width/2 + spacing/2
+    x_ticks = []
+    cmap = plt.cm.get_cmap('cool')
+
+    for x, (e, pvals_dict) in enumerate(p_value_counts.items()):
+        # ``explanation`` - for each specific test:
+        # pvaltest_count = dict(zip(p_thresholds, p_counts))
+        pvaltest_count = pvals_dict[test]
+        if n_thresholds != len(pvaltest_count):
+            raise ValueError('*** Seems like some p-vals are > .1!')
+
+        x_min = x_ctr - hist_width/2 + width/2
+        x_max = x_ctr + hist_width/2 - width/2
+        bars_xs = np.linspace(x_min, x_max, n_thresholds)
+        scaled_colorvalues = [int(v*cmap.N/n_thresholds) for v in range(n_thresholds)]
+        
+        # import ipdb; ipdb.set_trace()
+        plt.bar(bars_xs, pvaltest_count.values(), width=width,
+                color=cmap(scaled_colorvalues)) # , label=str(e))
+        # annotate
+        for i, (th, cnt) in enumerate(pvaltest_count.items()):
+            col_txt = 'k'
+            if cnt > 8000:
+                vert_align = 'top'
+                if i > 1:
+                    col_txt = 'w'
+            else:
+                vert_align = 'bottom'
+            plt.annotate('{}: {}'.format('p < ' + str(th), str(cnt)), c=col_txt,
+                         xy=(bars_xs[i], cnt), xytext=(0, 3), rotation='90',
+                         textcoords='offset points', ha='center', va=vert_align)
+
+        x_ticks.append(x_ctr)
+        x_ctr += (hist_width + spacing)
+
+    plt.xticks(x_ticks, ['epoch ' + str(e) for e in list(p_value_counts.keys())])
+    plt.savefig(filename)
+    plt.close()
+
+
+def write_minmaxavg_tofile(p_vals, ks_p_vals, filename='g_test.txt', n_epoch=999):
     ''' to run with version specifier "V-G.0", 
     in order to avoid re-running previous analyses'''
     # check threshold, and write to file. 
@@ -138,6 +269,7 @@ def plot_pvals(filename, log_fp='test_gAUSs.txt'):
     df.plot(x='epoch', y='p_avg', kind='scatter', color='#cb4b16', ax=ax,
             logy=True, rot=5, fontsize=8, label='p-value')
     df.plot(x='epoch', y='ks_p_avg', kind='scatter', color='#2aa198', ax=ax,
+
             logy=True, label='KS p-value' )
 
     ax.set_xticks(range(120, 690, 10), minor=True)
@@ -161,6 +293,7 @@ def distribution_momenta(z, quantiles=[0.1,0.25, 0.5, 0.75,0.9], mean=False, idx
     if ks:
         _, ks_p_vals = ndim_kstest(z, axis=1)
 
+    
     mus = np.mean(z, axis=1)
     sigmas = np.std(z, axis=1)
     k_vals = distatis.kurtosis(z, axis=1)
@@ -185,24 +318,25 @@ def ndim_kstest(z, axis=1, cdf=None, args=()):
     z = np.apply_along_axis(distatis.kstest, axis, z, cdf)
     return (z[:,0], z[:,1])
 
-def plot_kde(z, y, x, n_hists=3, filename='sampled_densities.png', n_epoch=99):
+def plot_kde(z, x,att, att_sel=range(10), nrows=3, filename='sampled_densities.png', n_epoch=99):
 
-    ncols = 10 # nrows = n_hists
-    fig, axs = plt.subplots(nrows=n_hists, ncols=ncols, 
-                                sharex='all', sharey='all', figsize=(16, 4))
+    ncols = len(att_sel) # 
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, 
+                                sharex='all', sharey='all', figsize=(ncols * 3, nrows+1))
     digit = 0
-    plt.title('Sampled z for epoch {}'.format(n_epoch))
 
-    for col in range(ncols):
-        digit_idx = np.argwhere(y == digit)
-        random_idcs= [np.random.choice(digit_idx.flatten(), replace=False)
-                                                              for i in range(n_hists)]
-        z_subset = z[random_idcs]
-        x_subset = x[random_idcs]
+    for col in range(len(att_sel)):
+        # z_att = z[att.iloc[:, col].astype(bool)]
+        att_idcs = np.argwhere(np.array(att.iloc[:, att_sel[col] ]))
+        att_idcs = np.random.choice(att_idcs.flatten(), size=nrows, replace=False)
+        z_subset = z[att_idcs]
+        x_subset = x[att_idcs]
+        # random_idcs= [np.random.choice(digit_idx.flatten(), replace=False)
+        # 		                                              for i in range(n_rows)]
         # use random idcs to feed z[idcs] to `distribution_momenta(...)`
         p_vals, mus, sigmas, s_vals, k_vals, qs = distribution_momenta(z_subset, ks=False)
 
-        for row in range(n_hists):
+        for row in range(nrows):
             sns.distplot(z_subset[row], bins=20, rug=False, kde_kws=dict(linewidth=0.8),
                                         color='C'+str(digit), ax=axs[row, col])
             # axs[row, col].text(-4, .4,
@@ -210,16 +344,20 @@ def plot_kde(z, y, x, n_hists=3, filename='sampled_densities.png', n_epoch=99):
             #                    '$\sigma$: {:.2f}\n'.format(
             #                    mus[row], sigmas[row]),
             axs[row, col].set_xlabel('$\mu$: {:.2f}, $\sigma$: {:.2f}\np-val: {:.5f}'.format(
-                                         mus[row], sigmas[row], p_vals[row]),
+                                     mus[row], sigmas[row], p_vals[row]),
                                # '$\\beta_1$: {:.3f}\n'
                                # '$\\beta_2$: {:.3f}' s_vals[row], k_vals[row]),
                                      fontsize=7) #, linespacing=0.75)
+            if row == 0:
+                axs[row, col].set_title(att.columns[ att_sel[col] ] ) # nrows * col + row])
+
             maxy_dist = np.max(z_subset[row])
             miny, maxy = axs[row, col].get_ylim()
             minx, maxx = axs[row, col].get_xlim()
 
             # show handwritten sign-digit for each distribution. 
-            x_imagebox = OffsetImage(x_subset[row].reshape(28, 28), zoom=0.5)
+            x_img = np.moveaxis(x_subset[row].reshape(3, 64, 64), 0, -1)
+            x_imagebox = OffsetImage(x_img, zoom=0.5)
             x_imagebox.image.axes = axs[row, col]
             x_ab = AnnotationBbox(x_imagebox, xy=(1, 0.4), 
                               xycoords='data', boxcoords=("axes fraction", "data"))
@@ -239,8 +377,6 @@ def plot_kde(z, y, x, n_hists=3, filename='sampled_densities.png', n_epoch=99):
     plt.savefig(filename)
     plt.close()
 
-    # with open(filename, 'w') as f:
-    # 	f.write(
 
 def track_xz(net, loader, device, loss_fn, **kwargs):
 
@@ -293,73 +429,53 @@ def track_xz(net, loader, device, loss_fn, **kwargs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RealNVP on CIFAR-10')
 
-    parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
-    parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
-    parser.add_argument('--gpu_ids', default='[0]', type=eval, help='IDs of GPUs to use')
-    parser.add_argument('--dataset', '-ds', default='mnist', type=str, help='MNIST or CIFAR-10')
     # parser.add_argument('--num_samples', default=121, type=int, help='Number of samples at test time')
+
     # XXX PARAMS XXX
-    version_ = 'V-G.6'
+    version_ = 'V-G.1'
     force_ = False
+    # General architecture parameters
+    net_ = 'densenet'
+    dataset_ = 'celeba'
+    gpus_ = '[0]'
+    force_ = False
+    ys_ = False
+    track_x = False
+    pgaussfile_ = 'dceleb_gauss.txt' # for testing purposes
     # Analysis
+
+
+    assert (net_ == 'densenet')
+    in_channels_ = 3
+    num_scales_ = 3
+    resize_hw_ = '(64, 64)'
+    if dataset_ == 'celeba':
+        batch_size_ = 32
+        root_dir_ = 'data/1_den_celeba'
+        mid_channels_ = 128
+        num_levels_ = 8
+        num_samples_ = 64
+        if gpus_ == '[0, 1]':
+            batch_size_ = 128
+            num_samples_ = 128
+
+
+    parser.add_argument('--track_x', action='store_true', default=track_x)
+    parser.add_argument('--tellme_y', action='store_true', default=ys_)
     parser.add_argument('--force', '-f', action='store_true', default=force_, help='Re-run z-space analyses.')
     parser.add_argument('--version', '-v', default=version_, type=str, help='Analyses iteration')
-
-    # General architecture parameters
-    # XXX PARAMS XXX
-    pgaussfile_ = 'test_gAUSs.txt'
-    pgaussfile_ = 'dmnist_gauss_iso.txt' # for testing purposes
-    net_ = 'densenet'
-    dataset_ = 'mnist'
-    if dataset_ == 'mnist':
-        in_channels_ = 1
-        num_samples_ = 121
-    elif dataset_ == 'celeba':
-        in_channels_ = 3
-        # num_samples_ = 64
-
-    if net_ == 'resnet':
-        root_dir_ = 'data/res_3-8-32'
-        batch_size_ = 256
-
-        num_scales_ = 3
-        mid_channels_ = 32
-        num_levels_ = 8
-
-    if net_ == 'densenet':
-        # train one epoch: 6:14
-        # test: 12:12
-        num_scales_ = 3
-        if dataset_ == 'celeba':
-            batch_size_ = 64
-            mid_channels_ = 128
-            num_levels_ = 8
-            num_samples_ = 64
-            if gpus_ == '[0, 1]':
-                batch_size_ = 16
-                num_samples_ = 16
-
-        elif dataset_ == 'mnist': # data/dense_test6
-            root_dir_ = 'data/dense_test6'
-            batch_size_ = 218
-            mid_channels_ = 120
-            num_levels_ = 10
-            num_samples_ = 121
-            num_scales_ = 3
-
     parser.add_argument('--net_type', default=net_, help='CNN architecture (resnet or densenet)')
     parser.add_argument('--batch_size', default=batch_size_, type=int, help='Batch size')
     parser.add_argument('--root_dir', default=root_dir_, help='Analyses root directory.')
+    parser.add_argument('--dataset', '-ds', default=dataset_, type=str, help='MNIST or CIFAR-10')
     parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
     parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
     parser.add_argument('--mid_channels', default=mid_channels_, type=int, help='N of feature maps for first resnet layer')
     parser.add_argument('--num_levels', default=num_levels_, type=int, help='N of residual blocks in resnet')
     parser.add_argument('--pgaussfile', default=pgaussfile_, type=str, help='log gaussianity to file')
+    parser.add_argument('--resize_hw', default=resize_hw_, type=eval)
+    parser.add_argument('--gpu_ids', default=gpus_, type=eval, help='IDs of GPUs to use')
+    parser.add_argument('--benchmark', action='store_true', help='Turn on CUDNN benchmarking')
+    parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
     
-
-    # for i in range(120, 690, 10):
-    # 	model_meta_stuff = select_model(root_dir_, version_, test=i)
-    # 	main(parser.parse_args(), model_meta_stuff)
-    # 	print(" done.")
-    plot_pvals('figs/dmnist_gauss_iso.png', pgaussfile_)
-
+    main(parser.parse_args())

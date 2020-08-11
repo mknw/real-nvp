@@ -90,13 +90,14 @@ def main(args, model_meta_stuff = None):
 
 
     # p-vals, KS p-vals, mu, sigma, skewness, kurtosis, quartiles (.1, .25, .5, .75, .9)
+    import ipdb; ipdb.set_trace()
     p, ksp, m, s, b1, b2, qs = distribution_momenta(z) # for each instance. 
 
 
     mng_gauss_meas(p, ksp, args.pgaussfile, n_epoch=epoch)
 
     plot_kde(z, y, np.concatenate(stats['x'], axis=0),
-               n_hists=3, filename=fp_distr + '/gauss_hist.png', n_epoch=epoch)
+               nrows=3, filename=fp_distr + '/gauss_hist.png', n_epoch=epoch)
 
     mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
     cleanup_version_f(fp_vmarker)
@@ -309,6 +310,7 @@ def plot_kde(z, y, x, n_hists=3, filename='sampled_densities.png', n_epoch=99):
                                # '$\\beta_1$: {:.3f}\n'
                                # '$\\beta_2$: {:.3f}' s_vals[row], k_vals[row]),
                                      fontsize=7) #, linespacing=0.75)
+            axs[row, col].set_title(att.columns[nrows*col + row
             maxy_dist = np.max(z_subset[row])
             miny, maxy = axs[row, col].get_ylim()
             minx, maxx = axs[row, col].get_xlim()

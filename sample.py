@@ -42,68 +42,35 @@ def main(args):
     if str(device).startswith('cuda'):
         net = torch.nn.DataParallel(net, args.gpu_ids)
         cudnn.benchmark = args.benchmark
+    import ipdb; ipdb.set_trace()
 
-    if args.resume: # or not args.resume:
-        # Load checkpoint.
-        try:
-            checkpoint = torch.load(args.model_dir + '/model.pth.tar')
-        except FileNotFoundError:
-            checkpoint = torch.load(args.dir_samples + '/model_11.pth.tar')
-        net.load_state_dict(checkpoint['net'])
-        global best_loss
-        try:
-            best_loss = checkpoint['test_loss']
-        except:
-            best_loss = checkpoint['best_loss']
-        # we start epoch after the saved one (avoids overwrites).
-        start_epoch = checkpoint['epoch'] + 1
+    # Load checkpoint.
+    print('Resuming from checkpoint at ' + args.model_dir + '/model.pth.tar...')
+    assert os.path.isdir(args.model_dir), 'Error: no checkpoint directory found!'
+    checkpoint = torch.load(args.model_dir + '/model.pth.tar')
+    net.load_state_dict(checkpoint['net'])
+    global best_loss
+    try:
+        best_loss = checkpoint['test_loss']
+    except:
+        best_loss = checkpoint['best_loss']
+    # we start epoch after the saved one (avoids overwrites).
+    epoch = checkpoint['epoch']
 
-    loss_fn = RealNVPLoss()
-    param_groups = util.get_param_groups(net, args.weight_decay, norm_suffix='weight_g')
-    optimizer = optim.Adam(param_groups, lr=args.lr, eps=1e-7)
+    # loss_fn = RealNVPLoss()
+    # param_groups = util.get_param_groups(net, args.weight_decay, norm_suffix='weight_g')
+    # optimizer = optim.Adam(param_groups, lr=args.lr, eps=1e-7)
 
-    for epoch in range(start_epoch, start_epoch + args.num_epochs):
-        train_stats = train(epoch, net, trainloader, device, optimizer, loss_fn, args.max_grad_norm)
-        test_settings = filter_args(args.__dict__, fields = ['num_samples', 'dir_samples',
-                                                               'in_channels', 'img_size'])
-        test_settings = {**test_settings, **train_stats} # merge dicts.
-        if epoch % 10 == 0:
-            test(epoch, net, testloader, device, loss_fn, **test_settings)
-        else:
-            sample_and_log(epoch, net, device, **test_settings)
+    # for epoch in range(start_epoch, start_epoch + args.num_epochs):
+    test_settings = filter_args(args.__dict__, fields = ['num_samples', 'dir_samples',
+                                                           'in_channels', 'img_size', 'temp'])
+    for t in [0.6, 0.65,0.7, 0.75, 0.8, .85, .9, 0.95]:
+        test_settings['temp'] = t
+        test(epoch, net, testloader, device, **test_settings)
 
 
 
-def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
-    print('\nEpoch: %d' % epoch)
-    net.train()
-    loss_meter = util.AverageMeter()
-    bpd_meter = util.AverageMeter()
-    with tqdm(total=len(trainloader.dataset)) as progress_bar:
-        for x, _ in trainloader: # TODO: y -> _
-            x = x.to(device)
-            optimizer.zero_grad()
-            # import ipdb; ipdb.set_trace()
-            z, sldj = net(x, reverse=False)
-            loss = loss_fn(z, sldj)
-            loss_meter.update(loss.item(), x.size(0))
-            loss.backward()
-            util.clip_grad_norm(optimizer, max_grad_norm)
-            optimizer.step()
-            bpd_meter.update(util.bits_per_dim(x, loss_meter.avg))
-            progress_bar.set_postfix(loss=loss_meter.avg,
-                                                                bpd=bpd_meter.avg)
-            progress_bar.update(x.size(0))
-            #debugopt:
-    return {'train_loss': loss_meter.avg, 
-             'train_bpd': bpd_meter.avg}
-
-def save_imgrid(tensor, name):
-    grid = torchvision.utils.make_grid(tensor, nrow=int(tensor.shape[0] ** 0.5), padding=1, pad_value=255)
-    torchvision.utils.save_image(grid, name)
-    return
-
-def sample(net, num_samples, in_channels, device, img_size, temp=0.75, z=None):
+def sample(net, num_samples, in_channels, device, img_size, temp=0.8):
     """Sample from RealNVP model.
 
     Args:
@@ -111,113 +78,31 @@ def sample(net, num_samples, in_channels, device, img_size, temp=0.75, z=None):
         batch_size (int): Number of samples to generate.
         device (torch.device): Device to use.
     """
-    if z == None:
-        z = torch.randn((num_samples, in_channels, img_size, img_size), dtype=torch.float32,
-                     device=device) * temp
-    x, _ = net(z, reverse=True)
+    
+    z = torch.randn((num_samples, in_channels, img_size, img_size), dtype=torch.float32, device=device) #changed 3 -> 1
+    x, _ = net(z * temp, reverse=True)
     x = torch.sigmoid(x)
     return x, z
 
-def sample_and_log(epoch, net, device, **args):
+
+def test(epoch, net, testloader, device, **args):
     global best_loss
     net.eval()
     save_dir = args['dir_samples'] + '/epoch_{:03d}'.format(epoch) #  + str(epoch)
     os.makedirs(save_dir, exist_ok=True)
-    sample_fields = ['num_samples', 'in_channels', 'img_size']
-    # recover saved z_sample.pkl
-    if epoch > 0:
-        sample_z = torch.load(args['dir_samples'] + '/z_sample.pkl')
-        args['z'] = sample_z
-        sample_fields += ['z']
-        images, sample_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
-    else:
-        images, sample_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
-        torch.save(sample_z, args['dir_samples'] + '/z_sample.pkl')
-    # save img
-    num_samples = args['num_samples']
-    images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
-    torchvision.utils.save_image(images_concat, save_dir+"/x.png")
-    print(f'saved to {save_dir}/x.png')
-    # log loss
-    train_loss = args['train_loss']
-    train_bpd = args['train_bpd']
-    report = [epoch, '', '', train_loss, train_bpd]
-    dir_samples = args['dir_samples']
-    with open('{}/log'.format(dir_samples), 'a') as l:
-        report = ",".join([str(m) for m in report])
-        report += "\n"
-        print("\nWriting to disk:\n" + report + "At {}".format(dir_samples))
-        l.write(report)
 
-    state = {
-        'net': net.state_dict(),
-        'best_loss': best_loss,
-        'epoch': epoch,
-    }
-    torch.save(state, args['dir_samples'] + f'/model_{epoch}.pth.tar')
-
-
-
-def test(epoch, net, testloader, device, loss_fn, **args):
-    global best_loss
-    net.eval()
-    loss_meter = util.AverageMeter()
-    bpd_meter = util.AverageMeter()
-    with torch.no_grad():
-        with tqdm(total=len(testloader.dataset)+1) as progress_bar:
-            for x, _ in testloader:
-                x = x.to(device)
-                z, sldj = net(x, reverse=False)
-                loss = loss_fn(z, sldj)
-                loss_meter.update(loss.item(), x.size(0))
-                # bits per dimensions
-                bpd_meter.update(util.bits_per_dim(x, loss_meter.avg), x.size(0))
-
-                progress_bar.set_postfix(loss=loss_meter.avg,
-                                                                 bpd=bpd_meter.avg)
-                progress_bar.update(x.size(0))
-                
-    # Save checkpoint
-    save_dir = args['dir_samples'] + '/epoch_{:03d}'.format(epoch) #  + str(epoch)
-    os.makedirs(save_dir, exist_ok=True)
 
     # import ipdb; ipdb.set_trace()
-    sample_fields = ['num_samples', 'in_channels', 'img_size']
-    if epoch > 0:
-        sample_z = torch.load(args['dir_samples'] + '/z_sample.pkl')
-        args['z'] = sample_z
-        sample_fields += ['z']
-        images, sample_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
-    else:
-        images, sample_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
-        torch.save(sample_z, args['dir_samples'] + '/z_sample.pkl')
+    sample_fields = ['num_samples', 'in_channels', 'img_size', 'temp']
+    images, latent_z = sample(net, device=device, **filter_args( args, fields=sample_fields ) )
+
     # plot x and z
     num_samples = args['num_samples']
     images_concat = torchvision.utils.make_grid(images, nrow=int(num_samples ** 0.5), padding=2, pad_value=255)
-    torchvision.utils.save_image(images_concat, save_dir+'/x.png')
+    t = args['temp']
+    torchvision.utils.save_image(images_concat, save_dir+f"/x{t}.png")
+    print(f'saved to {save_dir}/x{t}.png')
 
-    # if loss_meter.avg < best_loss: #  or epoch % 10 == 0 or
-    print('\nSaving...')
-    state = {
-        'net': net.state_dict(),
-        'best_loss': loss_meter.avg,
-        'epoch': epoch,
-    }
-    torch.save(state, args['dir_samples'] + f'/model_{epoch}.pth.tar')
-    best_loss = loss_meter.avg
-
-
-    # dict keys as returned by "train"
-    train_loss = args['train_loss']
-    train_bpd = args['train_bpd']
-    report = [epoch, loss_meter.avg, bpd_meter.avg] + [train_loss, train_bpd]
-
-    dir_samples = args['dir_samples']
-    with open('{}/log'.format(dir_samples), 'a') as l:
-        report = ", ".join([str(m) for m in report])
-        report += "\n"
-        print("\nWriting to disk:\n" + report + "At {}".format(dir_samples))
-        l.write(report)
 
 
 def filter_args(arg_dict, fields=None):
@@ -289,7 +174,7 @@ if __name__ == '__main__':
     # 2. Architecture
     net_ = 'densenet'  # 2.
     # 3. Samples dir_
-    dir_ = '/2_' + net_[:3] +'_'+ dataset_ if dataset_ == 'celeba' else '/dense_test6' # 3.
+    dir_ = '/1_' + net_[:3] +'_'+dataset_ if dataset_ == 'celeba' else '/dense_test6' # 3.
     # dir_ = '/dense_test6'
     # only multi-gpu if celeba.resnet.
     # 4. GPUs
@@ -297,6 +182,7 @@ if __name__ == '__main__':
     # 5. resume training?
     resume_ = True # 5.
     # 6. resize 
+    temp_ = 0.8
 
     if dataset_ == 'mnist':
         in_channels_= 1
@@ -305,12 +191,8 @@ if __name__ == '__main__':
         img_size = 64
 
     if resume_:
-        try:
-            model_dir_ = find_last_epoch_model('data' + dir_)
-        except:
-            import ipdb; ipdb.set_trace()
-            
-        parser.add_argument('--model_dir', default=model_dir_, help="Directory for storing generated samples")
+        # model_dir_ = find_last_epoch_model('data' + dir_)
+        model_dir_ = 'data/' + dir_ + '/epoch_700'
         
     parser.add_argument('--img_size', default=img_size, type=eval)
 
@@ -328,11 +210,11 @@ if __name__ == '__main__':
     if net_ == 'densenet':
         # train one epoch: 6:14
         # test: 12:12
-        num_scales_ = 4
+        num_scales_ = 3
         if dataset_ == 'celeba':
             batch_size_ = 64
             mid_channels_ = 128
-            num_levels_ = 10
+            num_levels_ = 8
             num_samples_ = 64
             if gpus_ == '[0, 1]':
                 batch_size_ = 16
@@ -363,9 +245,11 @@ if __name__ == '__main__':
             # testing :  16:55   / epoch
             # time on RTX2080Ti (batch_size == 4):
 
+    parser.add_argument('--temp', default=temp_, type=float, help='Batch size')
     parser.add_argument('--batch_size', default=batch_size_, type=int, help='Batch size')
     parser.add_argument('--mid_channels', default=mid_channels_, type=int, help='N of feature maps for first resnet layer')
     parser.add_argument('--num_levels', default=num_levels_, type=int, help='N of residual blocks in resnet, or N of dense layers in densenet (depth)')
+    parser.add_argument('--model_dir', default=model_dir_, help="Directory for storing generated samples")
     parser.add_argument('--num_samples', default=num_samples_, type=int, help='Number of samples at test time')
     parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
 

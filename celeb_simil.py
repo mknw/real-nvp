@@ -24,6 +24,7 @@ import argparse
 import os
 import shutil
 from random import randrange
+from mnist_simil import cleanup_version_f
 
 
 def main(args, model_meta_stuff = None):
@@ -52,12 +53,15 @@ def main(args, model_meta_stuff = None):
         elif args.dataset == 'CIFAR-10':
             testloader = load_cifar_test(args)
 
-        if args.force: # make it explicit, it is better.
+        if not args.tellme_y: # make it explicit, it is better.
             net = load_network( fp_model, device, args)
             loss_fn = RealNVPLoss()
-            stats, x_cA = track_z_celeba(net, testloader, device, loss_fn, track_x=True)
+            if args.track_x:
+                stats, x_cA = track_z_celeba(net, testloader, device, loss_fn, track_x=True)
+                torch.save(x_cA, 'data/1_den_celeba/x.pkl')
+            else:
+                stats = track_z_celeba(net, testloader, device, loss_fn, track_x=False)
             torch.save(stats, stats_filename)
-            torch.save(x_cA, 'data/1_den_celeba/x.pkl')
 
     ''' Attributes annotation '''
     if args.tellme_y:
@@ -73,72 +77,100 @@ def main(args, model_meta_stuff = None):
     fp_simil = fp_model_root + '/similarity' # similarity
     fp_replace = fp_model_root + '/replace_from_grandz'
     fp_pca = fp_model_root + '/pca'
+    fp_umap = fp_model_root + '/umap'
     paths = [fp_distr, fp_simil, fp_replace, fp_pca]
-    maketree = lambda l: [os.makedirs(p) for p in l if not os.path.isdir(p)]
+    # lstify = lambda s: [s] if isinstance(s, str)
+    def lstify(s):
+        if isinstance(s, str):
+            return [s]
+        elif isinstance(s, list):
+            return s
+
+    maketree = lambda l: [os.makedirs(p, exist_ok=True) for p in lstify(l)]
     maketree(paths)
     # [os.makedirs(ppp, exist_ok=True) for ppp in [fp_distr, fp_simil, fp_replace, fp_pca]]
     
     
-    ''' distributions analyses '''
+    # ''' distributions analyses '''
     # print("analysing z distribution... ")
     # scatter_all(stats, fp_distr + '/meanstds.png', epoch)
 
     # scatter_attr(stats, attr_y, fp_distr + '/faces_subplots3.png', epoch)
-    # # violin_eachdigit(stats, fp_distr + '/dig_violins.png', epoch)
-    ''' distance analysis '''
+    # # # # violin_eachdigit(stats, fp_distr + '/dig_violins.png', epoch)
+    # # ''' distance analysis '''
     # distances = calculate_distance(stats, attr_y, measure='mean')
     # heatmap(distances, attr_y, fp_simil + '/distances_mean.png',
-    # 			plot_title='Average distance between digits in Z space (means)')
+    # 			plot_title='Average distance between attributes in Z space (means)')
     # distances = calculate_distance(stats, attr_y, measure='std')
     # heatmap(distances, attr_y, fp_simil + '/distances_std.png',
     # 			plot_title='Average distance between digits in Z space (std)')
     # distances = calculate_distance(stats, attr_y, joint=True)
     # heatmap(distances, attr_y, fp_simil + '/distances.png')
 
-    # distances = y_distance_z(stats)
-    # measure = 'mean'
-    # for m in range(distances.shape[0]):
-    # 	heatmap(distances[m], fp_simil + f'/pixelwise_dist_{measure}.png',
-    # 							 plot_title=f'pixelwise {measure} similarity')
-    # 	measure = 'std'
+    # # # distances = y_distance_z(stats)
+    # # # measure = 'mean'
+    # # # for m in range(distances.shape[0]):
+    # # # 	heatmap(distances[m], fp_simil + f'/pixelwise_dist_{measure}.png',
+    # # # 							 plot_title=f'pixelwise {measure} similarity')
+    # # # 	measure = 'std'
 
     # all_nz = grand_z(stats, attr_y)
-    # overall Z for each digit (averaged across batches).
+    # # overall Z for each digit (averaged across batches).
     # plot_grand_z(all_nz, attr_y.columns, fp_model_root + '/grand_zs_normimg.png')
     # plot_grand_z_rgb(all_nz, attr_y.columns, fp_model_root + '/grand_zs_rgb.png')
     # if 'net' not in dir():
     # 	net = load_network( fp_model, device, args)
-    # z=craft_z(all_nz,kept=3) #helper function, included in sample_from_crafted_z.
-    # for k in [5, 10, 25, 50, 100, 200]:
-    # fp_replace += '/ratio'
-    # maketree([fp_replace])
-    # for k in range(2, 10):
-    # 	k = 4096 // k
-    # 	sample_from_crafted_z(net, all_nz, absolute=True, kept=k, device=device, reps=1,
-    # 								 save_dir=fp_replace) #monster_mode=True)
-    
+    # 	net.eval()
 
-    ''' dimensionality reduction '''
+    # fp_replace += '/ratio'
+    # maketree(fp_replace)
+    # with torch.no_grad():
+    # 	for i in range(1, 11):
+    # 		k = int(12288 / 2 ** i)
+    # 		sample_from_crafted_z(net, all_nz, absolute=True, kept=k, device=device, reps=1,
+    # 							 save_dir=fp_replace) #monster_mode=True)
+
+    # 	sample_from_crafted_z(net, all_nz, absolute=True, kept=12288, device=device, reps=1,
+    # 							 save_dir=fp_replace) #monster_mode=True)
+
+    # 
+
+    # ''' dimensionality reduction '''
+    # if 'net' not in dir():
+    # 	net = load_network( fp_model, device, args)
+    # 	net.eval()
+
+    # dataset = stats['z'].reshape(stats['z'].shape[0], -1)
+
+    # # # # pick_components = 350
+    # # fp_pca += '/new'; maketree([fp_pca])
+    # for pick_components in [50, 100, 1000]:
+    # 	print('computing PCA...{}...'.format(pick_components), end='')
+    # 	pca = PCA(n_components=pick_components).fit(dataset) # dataset.data
+    # 	if pick_components == 'mle':
+    # 		print(f' N PCs found: {pca.n_components_}')
+    # 	analyse_principal_components(pca,stats,attr_y,fp_pca,36, net, device)
+
+    print('umap analysis')
     if 'net' not in dir():
         net = load_network( fp_model, device, args)
+        net.eval()
+    fp_umap += '/inv'; maketree([fp_umap])
+    umap_inverse_wrapper(stats, attr_y, fp_umap, net, device)
+    print('done')
+    # # UMAP -- `test_umap` will use directories `<fp_model_root>/umap/{,3d}`
+    # fn_prefix = fp_model_root + '/umap'
+    # os.makedirs(fn_prefix+'/3d', exist_ok=True)
+    # for nn in [7, 10, 20, 100, 400]:
+    # 	# add option to reduce nn for 3d. 
+    # 	dims = [2, 3] if nn in [7, 20] else [2]
+    # 	for md in [0.01, 0.1, 0.5, 0.9]:
+    # 		for d in dims:
+    # 			test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md*0.05, n_components=d)
 
-    pick_components = 'mle'
-    dataset = stats['z'].reshape(stats['z'].shape[0], -1)
-    pca = PCA(n_components=pick_components).fit(dataset) # dataset.data
-    # fp_pca += '/new'; maketree([fp_pca])
-    analyse_principal_components(pca,stats,attr_y,fp_pca,36) # net, device)
-    import ipdb; ipdb.set_trace()
+    # 
+    
 
-    # UMAP -- `test_umap` will use directories `<fp_model_root>/umap/{,3d}`
-    fn_prefix = fp_model_root + '/umap'
-    os.makedirs(fn_prefix+'/3d', exist_ok=True)
-
-    for nn in [7, 10, 20]:
-        # add option to reduce nn for 3d. 
-        dims = [2, 3] if (nn % 10 == 0) else [2]
-        for md in range(2, 8, 2):
-            for d in dims:
-                test_umap(stats, fn_prefix, n_neighbors=nn, min_dist=md*0.05, n_components=d)
 
     mark_version(args.version, fp_vmarker, finish=True) # echo '0.2' >> fp_vmarker
     cleanup_version_f(fp_vmarker)
@@ -159,25 +191,6 @@ def issue_z_from_pc(PC, stats, filename):
             # every PC
             pass
     pass
-
-def label_zs(z_s):
-    ''' Arg:
-        z_s list of ndarrays '''
-    change_index = [z.shape[0] for z in z_s] # + 1 digit [0-9]
-    # Prepare dataset:
-    n_datapoints = np.sum(change_index)
-    assert n_datapoints == 10000
-    z = np.concatenate(z_s).reshape(n_datapoints, -1)
-    # track target category:
-    fill_val = 0
-    y = np.array([]).astype(int)
-    for ci in change_index:
-        arr = np.array([fill_val]).repeat(ci)
-        y = np.concatenate([y, arr])
-        fill_val += 1
-    return z, y
-
-
 
 
 def PCA_eig_np(Z, k, center=True, scale=False):
@@ -201,7 +214,7 @@ def PCA_eig_np(Z, k, center=True, scale=False):
                 'exp_var': explained_variance}
 
 
-def analyse_principal_components(pca, stats, att, fp_pca,pk, net=None, device=None, n_rX_dig=3):
+def analyse_principal_components(pca, stats, att, fp_pca,pk, net=None, device=None):
     '''
     Arguments: 
         - pca: sklearn.decomposition. PCA object. after calling .fit()
@@ -211,79 +224,84 @@ def analyse_principal_components(pca, stats, att, fp_pca,pk, net=None, device=No
     '''
 
     print("plotting reconstructed Z... ", end='')
-    fn = fp_pca + '/rZ_ncomps-{}.png'.format(pca.n_components_)
-    plot_rZ(pca, stats['z'],att, filename=fn, n_examples=n_rX_dig, net=net, device=device)
+    sel_attr = [[i + 5*j for i in range(5)] for j in range(8)] # == 40
+    for att_selection in sel_attr:
+        fn = fp_pca + '/rZ_att-{}_ncomps-{}.png'.format(''.join([str(i) for i in att_selection]),
+                                                      pca.n_components_)
+        plot_rZ(pca, stats['z'], att, filename=fn, n_examples=6,
+               net=net, device=device, selected_attributes=att_selection)
     print("done.")
 
-    print("plotting components in grid format... ", end='')
-    fn = fp_pca + '/PCgrid_{}.png' # XXX TO CHANGE
-    plot_PCgrid(pca, fn)
-    print("done.")
+    fn = fp_pca + '/PCgrid_first-{}.png'.format(pk)
+    if not os.path.isfile(fn):
+        print("plotting components in grid format... ", end='')
+        plot_PCgrid(pca, fn)
+        print("done.")
 
     print("plotting variance explained... ", end='')
-    fn = fp_pca + '/VE.png'
+    fn = fp_pca + '/VE_ncomps-{}.png'
     plot_expvar(pca.n_components_, pca.explained_variance_ratio_, fn)
     print("done.")
 
-    # os.mkdir(fp_pca+'/red', exist_ok=True)
-    # for i in range(40):
-    # 	print(f"plotting {att.columns[i]} reduced z's... ", end='')
-    # 	fn = fp_pca + '/red/rZatt_{}-{}.png'.format(i, att.columns[i])
-    # 	plot_reduced_dataset(pca, stats['z'], att, k=10, att_ind=i, filename=fn)
+    os.makedirs(fp_pca+'/red', exist_ok=True)
+    for i in range(40):
+        print(f"plotting {att.columns[i]} reduced z's... ", end='')
+        fn = fp_pca + '/red/rZatt_{}-{}.png'.format(i, att.columns[i])
+        plot_reduced_dataset(pca, stats['z'], att, k=10, att_ind=i, filename=fn)
     print("done.")
 
 
-def plot_rZ(pca, z_s, att, filename, n_examples, net, device, selected_attributes=None):
+def plot_rZ(pca, z_s, att, filename, n_examples, net, device, selected_attributes=5
+              ):
 
     from matplotlib.offsetbox import OffsetImage, AnnotationBbox
     '''z_s, y'''
-
-    nrows, ncols = n_examples, 10 # 3 instances, 10 n of sel. categories.
-    h_size = n_examples
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(30, 5))
-    cmap = plt.cm.RdBu
-    zcmap = plt.cm.gray
-    # axs[0, 0].imshow(PCs['mean'].reshape(28, 28))
-    # axs[0, 0].set_title('\mu')
-    pc_i = 1
-    # import ipdb; ipdb.set_trace()
-    if not selected_attributes:
+    if not isinstance(selected_attributes, int):
+        nrows, ncols = n_examples, len(selected_attributes)# 3 instances, 10 n of sel. categories.
+    else:
+        nrows, ncols = n_examples, selected_attributes
         selected_attributes = np.random.choice([i for i in range(40)], size=ncols, replace=False)
 
+    h_size = n_examples
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols*6,nrows*2))
+
+    pc_i = 1
+
     for col in range(ncols):
-        # ori_Z = z_s[dig_idx].astype(np.float32)
-        # Select nrows of celebrities
-        n_att = selected_attributes[col]
-        ori_Z = z_s[att.iloc[:, n_att].astype(bool)].astype(np.float32)
-        celeb_idx = np.random.randint(ori_Z.shape[0], size=nrows)
-        ori_Z = ori_Z[celeb_idx]
-        
-        ### original Zs
-        # keep original Zs for plotting; oriZ for generation
-        # variable without underscores are used for the GPU (pytorch).
-        ori_Z = ori_Z.reshape(nrows,3,64,64)
-        oriZ = torch.from_numpy(ori_Z).to(device)
-        oriX, _ = net(oriZ, reverse=True)
-        oriX = torch.sigmoid(oriX)
-        oriX = oriX.cpu().detach().numpy()
-        # Transform with PCA explained by MLE.
-        red_Z = pca.transform(ori_Z.reshape(nrows, -1))
-        rec_Z = pca.inverse_transform(red_Z)
-        ### reconstruced Zs
-        rec_Z = rec_Z.reshape(nrows, 3, 64, 64)
-        # keep rec_Z for plotting; recZ for generation.
-        recZ = torch.from_numpy(rec_Z.astype(np.float32)).to(device)
-        recX, _ = net(recZ, reverse=True)
-        recX = torch.sigmoid(recX)
-        recX = recX.cpu().detach().numpy()
-        ### normalize over array cel_rZ
-        cel_rZ = (rec_Z - rec_Z.min()) / (rec_Z.max() - rec_Z.min())
-        # axs[0, col].set_title(f"{col}")
-        axs[0, col].set_title(att.columns[n_att], fontsize='x-small')
+        with torch.no_grad():
+            # ori_Z = z_s[dig_idx].astype(np.float32)
+            # Select nrows of celebrities
+            n_att = selected_attributes[col]
+            ori_Z = z_s[att.iloc[:, n_att].astype(bool)].astype(np.float32)
+            celeb_idx = np.random.randint(ori_Z.shape[0], size=nrows)
+            ori_Z = ori_Z[celeb_idx].copy()
+            
+            ### original Zs
+            # keep original Zs for plotting; oriZ for generation
+            # variable without underscores `_` are used for the GPU (pytorch).
+            ori_Z = ori_Z.reshape(nrows,3,64,64)
+            oriZ = torch.from_numpy(ori_Z).to(device)
+            oriX, _ = net(oriZ, reverse=True)
+            oriX = torch.sigmoid(oriX)
+            oriX = oriX.cpu().detach().numpy()
+            # Transform with PCA explained by MLE.
+            red_Z = pca.transform(ori_Z.reshape(nrows, -1))
+            rec_Z = pca.inverse_transform(red_Z)
+            ### reconstruced Zs
+            rec_Z = rec_Z.reshape(nrows, 3, 64, 64)
+            # keep rec_Z for plotting; recZ for generation.
+            recZ = torch.from_numpy(rec_Z.astype(np.float32)).to(device)
+            recX, _ = net(recZ, reverse=True)
+            recX = torch.sigmoid(recX)
+            recX = recX.cpu().detach().numpy()
+            ### normalize over array cel_rZ
+            cel_rZ = (rec_Z - rec_Z.min()) / (rec_Z.max() - rec_Z.min())
+            # axs[0, col].set_title(f"{col}")
+            axs[0, col].set_title(att.columns[n_att], fontsize='x-small')
 
         for row in range(nrows):
             
-            axs[row, col].imshow(np.moveaxis(cel_rZ[row], 0, -1), cmap=cmap)
+            axs[row, col].imshow(np.moveaxis(cel_rZ[row], 0, -1))
 
             axs[row, col].tick_params(axis='both', which='both', bottom=False, top=False, labelbottom=False,
                     right=False, left=False, labelleft=False)
@@ -295,15 +313,15 @@ def plot_rZ(pca, z_s, att, filename, n_examples, net, device, selected_attribute
 
             # Show original and reconstructed X
             before = np.moveaxis(oriX[row].reshape(3,64,64), 0, -1)
-            oriX_imbox = OffsetImage(before, zoom=0.5, cmap=zcmap)
-            oX_ab = AnnotationBbox(oriX_imbox, xy=(-0.5, 0.5), 
+            oriX_imbox = OffsetImage(before, zoom=1.2)
+            oX_ab = AnnotationBbox(oriX_imbox, xy=(-0.6, 0.5), 
                               xycoords='data', boxcoords="axes fraction")
             axs[row, col].add_artist(oX_ab)
 
             after = np.moveaxis(recX[row].reshape(3,64,64), 0, -1)
-            recX_imbox = OffsetImage(after, zoom=0.5, cmap=zcmap)
+            recX_imbox = OffsetImage(after, zoom=1.2)
             # x_imagebox.image.axes = axs[row, col]
-            rX_ab = AnnotationBbox(recX_imbox, xy=(1.5, 0.5), 
+            rX_ab = AnnotationBbox(recX_imbox, xy=(1.6, 0.5), 
                               xycoords='data', boxcoords="axes fraction")
             axs[row, col].add_artist(rX_ab)
 
@@ -317,16 +335,18 @@ def plot_PCgrid(PCA, filename, pk=None, reconstruct=False):
     if not pk: # Plot Komponents
         pk = min(PCA.n_components_, 7*7)
     PCs = PCA.components_
+    n_pcs = PCA.n_components_
     var_exp = PCA.explained_variance_
     # y = PCs['y']
     nrows = ncols = int(pk ** 0.5)
     # nrows +=1
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(pk*2, pk*2))
-    PCs = PCs.reshape(-1, 3, 64, 64)
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(ncols*2, nrows*2))
+    PCs = PCs.reshape(n_pcs, 3, 64, 64)
     # PCs = (comp - comp.min()) / (comp.max() - comp.min())
     # cmap = plt.cm.RdBu
     mean_red_z = PCA.mean_.reshape(3, 64, 64)
-    axs[0, 0].imshow(np.moveaxis(mean_red_z, 0, -1), cmap=cmap)
+    mean_red_z = (mean_red_z - mean_red_z.min()) / (mean_red_z.max() - mean_red_z.min())
+    axs[0, 0].imshow(np.moveaxis(mean_red_z, 0, -1))
     axs[0, 0].set_title('$\mu$')
     pc_i = 0
     for row in range(nrows):
@@ -338,7 +358,6 @@ def plot_PCgrid(PCA, filename, pk=None, reconstruct=False):
                 axs[row, col].imshow(comp_img)
                 axs[row, col].set_title('PC{}'.format(pc_i+1))
             # else:  # if pc_i >= pk:
-            # 	import ipdb; ipdb.set_trace()
             # 	# axs[row, col].remove()
             # 	# axs[row, col] = None
             pc_i += 1
@@ -346,7 +365,7 @@ def plot_PCgrid(PCA, filename, pk=None, reconstruct=False):
 
     plt.tight_layout()
     fig.subplots_adjust(top=.88)
-    plt.savefig(filename.format(pk)) # TOFIX
+    plt.savefig(filename) # TOFIX
     plt.close()
 
 
@@ -378,10 +397,15 @@ def select_att_series(attr_df, att_ind, max_attributes=10):
     else:
         length = len(att_ind)
         if length > 1: # assumed sequence
-
-            subsel_df = attr_df.iloc[:, np.array(att_ind)]
+            selection = attr_df.iloc[:, np.array(att_ind)]
+            attribute_names = list(selection.columns)
+            complement_categs_names = ['comp_' + c for c in attribute_names]
+            # concatenate selected attributes df with its complementary.
+            subsel_df = pd.concat([selection, (attr_df.iloc[:, np.array(att_ind)] == 0)], axis=1)
+            subsel_df.columns = attribute_names + complement_categs_names
+            overall_indexer = (subsel_df == 1).any(axis=1)
             
-
+            return pd.concat([subsel_df, overall_indexer], axis=1)
 
         elif length < 1 or length > max_attributes:
             raise ValueError
@@ -399,7 +423,6 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
         components = pca.components_[:k][::-1]
         var_exp = pca.explained_variance_[:k][::-1]
         ratio_var_exp = pca.explained_variance_ratio_[:k][::-1]
-        # import ipdb; ipdb.set_trace()
         '''z_s, y = label_zs(z_s)'''
         
         sel_att_df = select_att_series(att, att_ind)
@@ -416,13 +439,7 @@ def plot_reduced_dataset(pca, z_s, att, k, att_ind, filename):
 
     # Use subset dataframe turn 1 hot vectors into indices,
     # then add column for "both" categories if overlapping.
-    color_series = sel_att_df.iloc[:, 0].copy()
-    color_series[sel_att_df.iloc[:, 1]] = 2
-    if sum(sel_att_df.iloc[:, -1] > 1):
-        overlapping_attributes = True
-        color_series[sel_att_df.iloc[:, -1]] = 3
-    else: overlapping_attributes = False
-
+    color_series, overlapping_attributes = category_from_onehot(sel_att_df)
     # color_series += 2 # make it red
     
     for row in range(n_pcs):
@@ -540,12 +557,12 @@ def plot_expvar(n_pcs, r_var_exp, filename):
 
     ax.set_xlim(left=0, right=n_pcs)
 
-    xtick_vals, xtick_labels = list(plt.xticks[0])
-    if n_pcs not in xtick_vals:
+    xtick_vals, xtick_labels = list(plt.xticks())
+    if float(n_pcs) not in xtick_vals:
         plt.xticks(xtick_vals + [n_pcs], xtick_labels + [n_pcs])
     
     # plt.title("variance explained first PC")
-    plt.savefig(filename)
+    plt.savefig(filename.format(n_pcs))
     plt.close()
 
 
@@ -629,42 +646,82 @@ def make_grid(boundaries, degrees=0, scale_factor = 0.5, edge_scale_factors=(0.3
     test_pts = make_interpolated_grid(alt_mtx)
     return  test_pts
 
-def umap_inverse_wrapper(stats, fp_umap, net, device, n_neighbors_l=None):
 
-    dataset, col_arr = label_zs(stats['z'])
+def category_from_onehot(onehot_df, idcs=(0, 1), vals=(1, 2), over_val=None):
+    if idcs == (0, 1) and onehot_df.shape[1] > 3:
+        print("Warning: dataframe is misshaped for idcs (0, 1). Continue at own risk.")
+    i, j = idcs
+    val_i, val_j = vals
+    color_series = onehot_df.iloc[:, i].copy()
+    color_series[color_series == 1] = val_i
+    color_series[onehot_df.iloc[:, j]] = val_j
+
+    if (onehot_df.iloc[:, np.array(idcs)].sum(axis=1) > 1).any():
+        overlapping_onehot_ = True
+        print('W: overlapping categories found: filling with value: {over_val}')
+        color_series[onehot_df.iloc[:,np.array(idcs)].sum(axis=1)] = over_val
+    else: overlapping_onehot_ = False
+    return color_series, overlapping_onehot_
+
+
+
+def umap_inverse_wrapper(stats, att, fp_umap, net=None, device=None, n_neighbors_l=None):
+
+    dataset = stats['z'].reshape(stats['z'].shape[0], -1)
+
+    ''' attributes '''
+    # att_ind = (20, 31)
+    '''here''' # and call it in plot_inverse_umap
+    
     if not n_neighbors_l:
-        n_neighbors_l = [7, 10, 20, 200]
-        
-    for nn in n_neighbors_l:
+        n_neighbors_l = [20, 100, 400]
+        min_dist_l = [0.2, 0.2, 0.2]
+    else:
+        n_neighbors_l = [n_neighbors_l]
+    for nn , md in zip(n_neighbors_l, min_dist_l):
+        print(f'UMAP: nearest_n = {nn}, min_dist = .2')
         deg = 45
         knn = 100
         knn_w = 'distance'
-        if fp_umap.split('/')[2] == "epoch_680":
-            grid_s = 0.35
-        else:
-            grid_s = 0.7
-
-        umap = UMAP(n_neighbors=nn, min_dist=0.02,
+        # grid_s = 0.35
+        umap = UMAP(n_neighbors=nn, min_dist= md,
                                 n_components=2, random_state=42)
         mapper = umap.fit(dataset)
+        inverse_sampling = True
+        for a_i in range(40):
+            for a_j in range(a_i+1, 40):
 
-        fn = fp_umap+ '/l{}_nn{:d}_knn{:d}_d{:d}.jpg'.format(knn_w[:3],nn,knn,deg)
-        plot_inverse_umap(fn, n_neighbors=nn, knn=knn, deg_rot=deg, grid_scale=grid_s, y=col_arr,
-                          knn_weights=knn_w,mapper=mapper,net=net, device=device) # , grid_scale=0.8)
+                attributes = select_att_series(att, att_ind=(a_i, a_j))
+                col_arr = attributes.iloc[:, 0]
+                sym_arr = attributes.iloc[:, 1]
+                names = attributes.iloc[:,0].name + '-' + attributes.iloc[:,1].name
+
+                print(f'computing inverse umap sampling for: {names}', end='')
+        
+                basename = '/{}-{}_{}_nn{:d}_md{:.2f}_knn{:d}'.format(a_i, a_j, names, nn,md,knn)
+
+                fn = fp_umap + basename + '.jpg'
+                plot_inverse_umap(fn, att=att, n_neighbors=nn, min_dist=md, knn=knn, deg_rot=deg,
+                                  col_arr=col_arr, sym_arr=sym_arr, knn_weights=knn_w,
+                                  inverse_sampling=inverse_sampling,mapper=mapper,net=net,device=device)
+
+                inverse_sampling = False
 
 
-def plot_knn_boundaries(x1, x2, y, nn=5, weights='distance', h=.02, ax=None):
+def plot_knn_boundaries(x1, x2, y, nn=5, weights='distance', h=.02, ax=None,
+                          n_colors=2, cmap=None):
 
     from sklearn import neighbors
     from matplotlib.colors import ListedColormap
     # Lighter tab10 version:
-    tab20 = mpl.cm.get_cmap('tab20')
-    newcolors = tab20(np.linspace(0, 1, 20))[1::2]
-    dimmed_tab10= ListedColormap(newcolors)
+    if not cmap:
+        tab20 = mpl.cm.get_cmap('tab20')
+        newcolors = tab20(np.linspace(0, 1, 20))[1 : 1+n_colors*2 : 2]
+        cmap = ListedColormap(newcolors)
 
     clf = neighbors.KNeighborsClassifier(n_neighbors=nn, weights=weights)
     dataset = np.c_[x1, x2]
-    clf.fit(dataset, y)
+    clf.fit(dataset, y.astype(int))
 
     x_min, x_max = x1.min() - 1, x1.max() + 1
     y_min, y_max = x2.min() - 1, x2.max() + 1
@@ -676,17 +733,17 @@ def plot_knn_boundaries(x1, x2, y, nn=5, weights='distance', h=.02, ax=None):
     if not ax:
         plt.pcolormesh(xx, yy, Z, cmap='tab10', alpha=.2)
     else:
-        ax.pcolormesh(xx, yy, Z, cmap=dimmed_tab10)
+        ax.pcolormesh(xx, yy, Z, cmap=cmap)
         return ax, clf
 
 
-
-
-def plot_inverse_umap(filename, stats=None, n_neighbors=None, min_dist=0.02,
-                          n_components=2, deg_rot=45, mapper=None, y=None, knn=100,
+def plot_inverse_umap(filename, stats=None, att=None,
+                          n_neighbors=None, min_dist=0.02, n_components=2, inverse_sampling=False,
+                          deg_rot=45, mapper=None, col_arr=None, sym_arr=None, knn=100,
                           knn_weights=None, net=None, device=None, grid_scale=0.7, **kwargs):
 
     if not mapper:
+        raise NotImplementedError
         if not stats:
             raise ValueError
         dataset = stats['z'].reshape(stats['z'].shape[0], -1)
@@ -699,41 +756,104 @@ def plot_inverse_umap(filename, stats=None, n_neighbors=None, min_dist=0.02,
 
     grid_boundaries = [mapper.embedding_[:,0].min(), mapper.embedding_[:,1].min(),
               mapper.embedding_[:,0].max(), mapper.embedding_[:,1].max()]
-
     test_pts = make_grid(grid_boundaries, degrees=deg_rot, scale_factor=grid_scale)
-    # setup grid
+
+    # setup plotting grid
     from matplotlib.gridspec import GridSpec
-    fig = plt.figure(figsize=(14,7))
-    gs = GridSpec(10, 20, fig)
-    scatter_ax = fig.add_subplot(gs[:, :10])
-    digit_axes = np.zeros((10, 10), dtype=object)
-    for i in range(10):
-        for j in range(10):
-            digit_axes[i, j] = fig.add_subplot(gs[i, 10+j])
+    if inverse_sampling:
+        fig = plt.figure(figsize=(22, 11))
+        gs = GridSpec(10, 20, fig)
+        scatter_ax = fig.add_subplot(gs[:, :10])
+        faces_axes = np.zeros((10, 10), dtype=object)
+        for i in range(10):
+            for j in range(10):
+                faces_axes[i, j] = fig.add_subplot(gs[i, 10+j])
+    else:
+        fig = plt.figure(figsize=(10, 10))
+        scatter_ax = fig.add_subplot()
+
+    # colormaps for knn boundaries and UMAP scatter.
+    from matplotlib.colors import ListedColormap
+
+    n_colors = col_arr.nunique() + sym_arr.nunique()
+
+    pastel_cmap = mpl.cm.get_cmap('Pastel1')
+    newcolors_knn = pastel_cmap(np.linspace(0, 1, 8))[0 : n_colors]
+    pastel_subcmap_knn = ListedColormap(newcolors_knn)
+
+    set1_cmap = mpl.cm.get_cmap('Set1')
+    newcolors_a = set1_cmap(np.linspace(0, 1, 8))[0 : n_colors//2]
+    set1_subcmap_a = ListedColormap(newcolors_a)
+    newcolors_b = set1_cmap(np.linspace(0, 1, 8))[n_colors//2: n_colors]
+    set1_subcmap_b = ListedColormap(newcolors_b)
+
+    col_arr_knn = col_arr.copy() # 0:  F / no S  || 1: M / no S
+
+    col_arr_knn[ (col_arr == 0) & (sym_arr == 0)] = 0 # F / no S
+    col_arr_knn[ (col_arr == 1) & (sym_arr == 0)] = 1 # M / no S
+    col_arr_knn[ (col_arr == 0) & (sym_arr == 1)] = 2 # F / S
+    col_arr_knn[ (col_arr == 1) & (sym_arr == 1)] = 3 # M / S 
     # KNNeighbors
     scatter_ax, knn_clf = plot_knn_boundaries(mapper.embedding_[:,0], mapper.embedding_[:,1],
-                                     weights=knn_weights, y=y, nn=knn, ax=scatter_ax)
-
-
+                                     weights=knn_weights, y=col_arr_knn, nn=knn,
+                                     ax=scatter_ax, cmap=pastel_subcmap_knn)
     # scatter embeddings. 
-    sctt_ax = scatter_ax.scatter(mapper.embedding_[:,0], mapper.embedding_[:,1], c=y.astype(np.int32), cmap='tab10', s=1)
-    # scatter_ax.set(xticks=[], yticks=[])
-    scatter_ax.scatter(test_pts[:,0], test_pts[:,1], marker='x', c='k', s=10, alpha=0.7)
-    inv_transformed_points = mapper.inverse_transform(test_pts[:,:-1])
-    # ### original Zs
-    # # keep original Zs for plotting; oriZ for generation
-    tZ = torch.from_numpy(inv_transformed_points.reshape(100,-1,28,28).astype(np.float32)).to(device)
-    tX, _ = net(tZ, reverse=True)
-    tX = torch.sigmoid(tX)
-    tX = tX.cpu().detach().numpy()
-
-    # plot generated digits:
-    for i in range(10):
-        for j in range(10):
-            digit_axes[i, j].imshow(tX[i*10+j].reshape(28, 28), cmap="gray")
-            digit_axes[i, j].set(xticks=[], yticks=[])
+    # We plot 2 categories and their respective complementaries.
+    # Category_1 is colorcoded (in col_arr)
+    # Category_2 is represented by markers (in sym_arr)
+    # here we separate the dataset by markers (symbols).
+    embedding_cat_2b = mapper.embedding_[sym_arr.astype(bool), :] # Smiling
+    embedding_cat_2a = mapper.embedding_[(sym_arr== 0), :]       #  Not smiling
+    # col_arr = np.array(col_arr)
+    col_arr_cat_2a = col_arr[(sym_arr==0)]          # no Smiling
+    col_arr_cat_2b = col_arr[sym_arr.astype(bool)] # Smiling
     
-    handles, labels = sctt_ax.legend_elements(prop='colors')
+
+    # No Smiling (F/M)# red / blue
+    sctt_ax_cat_2a = scatter_ax.scatter(embedding_cat_2a[:,0], embedding_cat_2a[:,1],
+                     c=col_arr_cat_2a.astype(int), marker = 'x', cmap=set1_subcmap_a, s=7)
+    # Smiling (F/M)# green / violet
+    sctt_ax_cat_2b = scatter_ax.scatter(embedding_cat_2b[:,0], embedding_cat_2b[:,1],
+                     c=col_arr_cat_2b.astype(int), marker = '+', cmap=set1_subcmap_b, s=7)
+
+    # scatter_ax.set(xticks=[], yticks=[])
+    if inverse_sampling:
+        scatter_ax.scatter(test_pts[:,0], test_pts[:,1], marker='x', c='k', s=15, alpha=1)
+        print(f'starting inverse transform for {test_pts.shape[0]} datapoints...', end='')
+
+        inv_transformed_points = mapper.inverse_transform(test_pts[:,:-1])
+        print('done!')
+        # ### original Zs
+        # # keep original Zs for plotting; oriZ for generation
+        torch.cuda.empty_cache()
+        tZ = torch.from_numpy(inv_transformed_points.reshape(100,-1,64,64).astype(np.float32)).to(device)
+        # tZ = torch.randn((100, 3, 64, 64), dtype=torch.float32, device=device) #changed 3 -> 1
+
+        tX = np.array([], dtype=np.float32).reshape(0, 3, 64, 64)
+        for t_Z_ in tZ.view(4, 25, 3, 64, 64):
+            with torch.no_grad():
+                t_x_, _ = net(t_Z_, reverse=True)
+                t_x_ = torch.sigmoid(t_x_)
+                tX = np.concatenate([tX, t_x_.to('cpu').detach().numpy()])
+
+        # plot generated digits:
+        for i in range(10):
+            for j in range(10):
+                x_face = tX[i*10+j].reshape(3, 64, 64)
+                faces_axes[i, j].imshow(np.moveaxis(x_face, 0, -1))
+                faces_axes[i, j].set(xticks=[], yticks=[])
+    
+    handles_2a, labels_2a = sctt_ax_cat_2a.legend_elements(prop='colors')
+    handles_2b, labels_2b = sctt_ax_cat_2b.legend_elements(prop='colors')
+
+    handles = handles_2a + handles_2b
+    color_attributes = 'no-' + col_arr.name, col_arr.name
+    marker_attributes =  'no-' + sym_arr.name, sym_arr.name
+
+    labels = ['/'.join([c, m]) for c in marker_attributes for m in color_attributes]
+
+    scatter_ax.legend(handles, labels, loc='best')
+
     scatter_ax.legend(handles, labels, loc='best')
     # plt.title('n_neighbors = {:d}; min_dist = {:.2f}'.format(n_neighbors, min_dist))
 
@@ -758,7 +878,7 @@ def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2,
     embeddings = reductor.fit_transform(dataset)
 
     if n_components == 2:
-        fig, ax = plt.subplots(figsize=(12,12))
+        fig, ax = plt.subplots(figsize=(10, 10))
         scatter = ax.scatter(embeddings[:,0], embeddings[:,1], c=col_arr, cmap='Spectral', s=4)
     elif n_components == 3:
         fn_prefix += '/3d'
@@ -772,7 +892,7 @@ def test_umap(stats, fn_prefix, n_neighbors=15, min_dist=0.1, n_components=2,
     ax.legend(handles, labels, loc='best', title='off-line digits')
     plt.title(f'n_neighbors = {n_neighbors}; min_dist = {min_dist}')
 
-    filename = fn_prefix + '/nn{:d}_md{:.1f}.jpg'.format(n_neighbors, min_dist, n_components)
+    filename = fn_prefix + '/nn{:d}.jpg'.format(n_neighbors, min_dist, n_components)
     plt.savefig(filename)
     plt.close()
     print(' Saved {}'.format(filename.split('/')[-1]))
@@ -887,7 +1007,7 @@ def craft_z(grand_zs, absolute, kept=None, reps=10, fold=False, device="cuda:0")
     return arr_mask, batch
 
 
-def sample_from_crafted_z(net, all_nz, absolute, kept, reps, device, save_dir, monster_mode=False):
+def sample_from_crafted_z(net, all_nz, absolute, kept, reps, device, save_dir, temp=.75, monster_mode=False):
     ''' 
     Input:
         all_nz: n-dimensional but also faces grand Z array.
@@ -900,11 +1020,11 @@ def sample_from_crafted_z(net, all_nz, absolute, kept, reps, device, save_dir, m
         z = z.reshape(1, C, hw, hw)
         # tile mask_zs horizontally (obtain 28 x 280 batches)
         mask_zs = np.tile(mask_zs, reps=(1, 1, 10))
-        mask_zs.reshape(280, 280)
+        mask_zs.reshape(3, 640, 640)
         kept = f'{kept}x{reps}'
 
         
-    z = torch.from_numpy(z).to(device)
+    z = torch.from_numpy(z*temp).to(device)
     x, _ = net(z, reverse=True)
     x = torch.sigmoid(x)
     
@@ -915,7 +1035,6 @@ def sample_from_crafted_z(net, all_nz, absolute, kept, reps, device, save_dir, m
     plot_grand_z(x, Attributes().headers, save_dir + f'/k{kept}_sample_attr.png')
     plot_grand_z(mask_zs, Attributes().headers, save_dir + f'/k{kept}_mask.png')
     del x, z, mask_zs
-    # return x, z
 
 def plot_grand_z(grand_zs, names, filename, n_rows_cols=(5, 8)):
     # mpl.rc('text', usetex=True)
@@ -945,6 +1064,7 @@ def plot_grand_z(grand_zs, names, filename, n_rows_cols=(5, 8)):
     fig.subplots_adjust(top=.88)
     plt.savefig(filename, bbox_inches='tight')
     print('\nPlot saved to ' + filename)
+    plt.close()
     del grand_zs
 
 
@@ -980,6 +1100,7 @@ def plot_grand_z_rgb(grand_zs, names, filename, n_rows_cols=(10, 12)):
     fig.tight_layout()
     fig.subplots_adjust(top=.88)
     plt.savefig(filename, bbox_inches='tight')
+    plt.close()
     print('\nPlot saved to ' + filename)
     del grand_zs
 
@@ -1087,6 +1208,7 @@ def heatmap(square_mtx, att, filename, plot_title="Magnitude of distance between
     ax.set_title(plot_title)
     fig.tight_layout()
     plt.savefig(filename, bbox_inches='tight')
+    plt.close()
     print(f'Plot saved to {filename}')
 
 
@@ -1123,6 +1245,7 @@ def violin_eachdigit(stats, att, filename, n_epoch):
     #for dig in range(10):
     #	plt.scatter(means[dig], stds[dig], c=colors[dig], label=str(dig), alpha=.8, s=.8)
     plt.savefig(filename, bbox_inches='tight')
+    plt.close()
     print('\nPlot saved to ' + filename)
 
 class Attributes:
@@ -1199,12 +1322,12 @@ def scatter_attr(stats, att, filename, n_epoch):
     n_att = 0.
     for col in range(ncols):
         for row in range(nrows):
-            att_name = att.columns[row+col*nrows] + ' $n={}$'.format(att_ds_n)
+            att_name = att.columns[row+col*nrows]
             mus = means[att[att_name].astype(bool)]
-            sigmas = stds[att[att_name].astype(bool)]
             att_ds_n = mus.shape[0]
+            sigmas = stds[att[att_name].astype(bool)]
             # print('{}: {}, {}'.format(att_name, mus.shape, sigmas.shape))
-            axs[row,col].set_title(att_name, fontsize='xx-small')
+            axs[row,col].set_title(att_name+ f' $n={att_ds_n}$' , fontsize='xx-small')
             axs[row,col].scatter(mus, sigmas, s=1,
                                  cmap=cmap, c=np.repeat(n_att, mus.shape[0]),
                                  norm=normidx, label=att_name)
@@ -1224,6 +1347,7 @@ def scatter_attr(stats, att, filename, n_epoch):
     fig.tight_layout()
     fig.subplots_adjust(top=.88)
     plt.savefig(filename)
+    plt.close()
     print('\nPlot saved to ' + filename)
 
 
@@ -1253,6 +1377,7 @@ def scatter_all(stats, filename, n_epoch):
     ax.scatter(means, stds, c='#fab111', alpha=.95, s=.8)
     # ax.legend()
     plt.savefig(filename, bbox_inches='tight')
+    plt.close()
     print('\nPlot saved to: ' + filename)
 
 
@@ -1264,7 +1389,6 @@ def grand_z(stats, att, filename=None):
     n_att = len(att.columns)
     all_nz = np.zeros(shape=(n_att, 3, 64, 64))
 
-    # import ipdb; ipdb.set_trace()
     for a in range(n_att):
         a_z = zspace[att.iloc[:, a].astype(bool)]
         grand_nz = np.mean(a_z, axis=0)
@@ -1324,8 +1448,12 @@ def track_z_celeba(net, loader, device, loss_fn, track_x=False,
             progress.update(x.size(0))
     # add loss.avg() and bpd.avg() somewhere in the plot.
     
-    return {'std': stds_z, 'mean': means_z, 'z': celeb_z, 
+    if track_x:
+        return {'std': stds_z, 'mean': means_z, 'z': celeb_z, 
                     'ch_std': ch_stds_z, 'ch_mean': ch_means_z}, {'x': celeb_x}
+    else:
+        return {'std': stds_z, 'mean': means_z, 'z': celeb_z, 
+                    'ch_std': ch_stds_z, 'ch_mean': ch_means_z}
 
 
 def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
@@ -1340,7 +1468,6 @@ def train(epoch, net, trainloader, device, optimizer, loss_fn, max_grad_norm):
             z, sldj = net(x, reverse=False)
             loss = loss_fn(z, sldj)
             loss_meter.update(loss.item(), x.size(0))
-            # import ipdb; ipdb.set_trace()
             loss.backward()
             util.clip_grad_norm(optimizer, max_grad_norm)
             optimizer.step()
@@ -1462,19 +1589,19 @@ def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
         # must end with a newline. byebye!
     m.close()
 
-def cleanup_version_f(fp_vmarker):
-
-    tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '')
-
-    with open(fp_vmarker, 'r') as v:
-        with open(tmp_fp_vmarker, 'w') as t:
-            for l in v:
-                stripped = l.strip()
-                if stripped == 'V-' or stripped == '':
-                    continue
-                else:
-                    t.write(l)
-    shutil.move(tmp_fp_vmarker, fp_vmarker)
+# def cleanup_version_f(fp_vmarker):
+# 
+# 	tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '')
+# 
+# 	with open(fp_vmarker, 'r') as v:
+# 		with open(tmp_fp_vmarker, 'w') as t:
+# 			for l in v:
+# 				stripped = l.strip()
+# 				if stripped == 'V-' or stripped == '':
+# 					continue
+# 				else:
+# 					t.write(l)
+# 	shutil.move(tmp_fp_vmarker, fp_vmarker)
     
 
 
@@ -1568,13 +1695,15 @@ if __name__ == '__main__':
 
 
     # Analysis
-    version_ = 'V-0.0'
+    version_ = 'V-1.1' # only change from 1.0: copy of rZ[idx] in plot_rZ
     # General architecture parameters
     net_ = 'densenet'
     dataset_ = 'celeba'
     gpus_ = '[0]'
     force_ = False
+    # only needed once for all epochs. 
     ys_ = False
+    track_x = False 
 
 
     assert (net_ == 'densenet')
@@ -1592,12 +1721,13 @@ if __name__ == '__main__':
             num_samples_ = 128
 
 
+    parser.add_argument('--track_x', action='store_true', default=track_x)
     parser.add_argument('--tellme_y', action='store_true', default=ys_)
     parser.add_argument('--force', '-f', action='store_true', default=force_, help='Re-run z-space anal-yses.')
+    parser.add_argument('--version', '-v', default=version_, type=str, help='Analyses iteration')
     parser.add_argument('--net_type', default=net_, help='CNN architecture (resnet or densenet)')
     parser.add_argument('--batch_size', default=batch_size_, type=int, help='Batch size')
     parser.add_argument('--root_dir', default=root_dir_, help='Analyses root directory.')
-    parser.add_argument('--version', '-v', default=version_, type=str, help='Analyses iteration')
     parser.add_argument('--dataset', '-ds', default=dataset_, type=str, help='MNIST or CIFAR-10')
     parser.add_argument('--num_scales', default=num_scales_, type=int, help='Real NVP multi-scale arch. recursions')
     parser.add_argument('--in_channels', default=in_channels_, type=int, help='dimensionality along Channels')
@@ -1609,11 +1739,11 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', default=8, type=int, help='Number of data loader threads')
 
 
-    model_meta_stuff = select_model(root_dir_, version_, test=300)
-    main(parser.parse_args(), model_meta_stuff)
-    # for i in range(580, 690, 10):
-    # 	print("Testing epoch {}...".format(i), end='')
-    # 	model_meta_stuff = select_model(root_dir_, version_, test=i)
-    #		main(parser.parse_args(), model_meta_stuff)
-    # 	print(" done.")
+    # model_meta_stuff = select_model(root_dir_, version_, test=700)
+    # main(parser.parse_args(), model_meta_stuff)
+    for i in [700, 742]: # range(580, 690, 10):
+        print("Testing epoch {}...".format(i), end='')
+        model_meta_stuff = select_model(root_dir_, version_, test=i)
+        main(parser.parse_args(), model_meta_stuff)
+        print(" done.")
 

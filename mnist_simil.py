@@ -154,6 +154,7 @@ def main(args, model_meta_stuff = None):
 
     if 'net' not in dir():
         net = load_network( fp_model, device, args)
+        net.eval()
 
     for n_comp in range(15, 100, 5):
         pick_components = n_comp
@@ -513,6 +514,7 @@ def plot_rZ(pca, z_s, filename, n_digits, net, device):
 
     z_s, y = label_zs(z_s) # Z_s array of shape 10000x28x28; y array of shape 10000
 
+    net.eval()
     nrows, ncols = n_digits, 10 # n o'categories
     h_size = n_digits
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(h_size*2, h_size))
@@ -1319,11 +1321,11 @@ def mark_version(version_str, fp_vmarker, finish=False, sep='-'):
         # must end with a newline. byebye!
     m.close()
 
-def cleanup_version_f(fp_vmarker):
+def cleanup_version_f(fp_vmarker, _removal_strings=['', 'V-']):
 
     tmp_fp_vmarker = '/home/mao540/tmp_realnvp' + fp_vmarker.replace('/', '%')
 
-    _removal_strings = ['V-', '']
+    # _removal_strings = [''] # 'V-', removed
     # _removal_strings += ['V-G.' + str(i) for i in range(5)] # gaussian analyses
 
     print("filtering analyses versions: ")
@@ -1443,7 +1445,7 @@ if __name__ == '__main__':
 
 
     # for i in [640, 670, 680]: # , 680]: # range(120, 690, 10):
-    for i in [640, 660, 670, 680]: # , 680]: # range(120, 690, 10):
+    for i in [700, 742]: # , 680]: # range(120, 690, 10):
         print("Testing epoch {}...".format(i), end='')
         model_meta_stuff = select_model(root_dir_, version_, test=i)
         main(parser.parse_args(), model_meta_stuff)
