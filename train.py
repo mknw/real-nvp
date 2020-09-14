@@ -48,7 +48,7 @@ def main(args):
         try:
             checkpoint = torch.load(args.model_dir + '/model.pth.tar')
         except FileNotFoundError:
-            checkpoint = torch.load(args.dir_samples + '/model_11.pth.tar')
+            checkpoint = torch.load(args.dir_samples + '/model_202.pth.tar')
         net.load_state_dict(checkpoint['net'])
         global best_loss
         try:
@@ -114,8 +114,9 @@ def sample(net, num_samples, in_channels, device, img_size, temp=0.75, z=None):
     if z == None:
         z = torch.randn((num_samples, in_channels, img_size, img_size), dtype=torch.float32,
                      device=device) * temp
-    x, _ = net(z, reverse=True)
-    x = torch.sigmoid(x)
+    with torch.no_grad():
+        x, _ = net(z, reverse=True)
+        x = torch.sigmoid(x)
     return x, z
 
 def sample_and_log(epoch, net, device, **args):
